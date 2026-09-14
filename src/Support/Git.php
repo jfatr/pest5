@@ -103,6 +103,13 @@ final readonly class Git
         return $this->raw(['show', $sha.':'.$path]);
     }
 
+    public function repositoryRoot(): ?string
+    {
+        $root = $this->output(['rev-parse', '--show-toplevel']);
+
+        return $root === null ? null : rtrim(str_replace(DIRECTORY_SEPARATOR, '/', $root), '/');
+    }
+
     public function pathPrefix(): string
     {
         $prefix = $this->output(['rev-parse', '--show-prefix']);

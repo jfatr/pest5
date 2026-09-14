@@ -22,6 +22,7 @@ use Pest\Plugins\Tia\ChangedFiles;
 use Pest\Plugins\Tia\CiBranch;
 use Pest\Plugins\Tia\Contracts\State;
 use Pest\Plugins\Tia\CoverageCollector;
+use Pest\Plugins\Tia\ExternalSources;
 use Pest\Plugins\Tia\Fingerprint;
 use Pest\Plugins\Tia\Graph;
 use Pest\Plugins\Tia\JsModuleGraph;
@@ -1051,6 +1052,25 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             $changed,
             $graph->lastRunTree($this->branch),
         );
+
+        $externalChanges = ExternalSources::matching($projectRoot, $outsideProject);
+
+        if ($externalChanges !== []) {
+            $this->fullSuiteFallbackRan = true;
+
+            $this->renderBadge('WARN', sprintf(
+                'Detected changes in %d file%s this project loads from outside its root.',
+                count($externalChanges),
+                count($externalChanges) === 1 ? '' : 's',
+            ));
+            $this->renderChild('Running the full suite — the dependency graph only reaches files under the project root.');
+
+            foreach (array_slice($externalChanges, 0, $this->output->isVerbose() ? count($externalChanges) : 5) as $file) {
+                $this->output->writeln(sprintf('  <fg=gray>%s</>', $file));
+            }
+
+            return $arguments;
+        }
 
         $hasProjectPhpSourceChanges = $this->hasProjectPhpSourceChanges($changed);
         $coverageAvailable = $this->piggybackCoverage || $this->recorder->driverAvailable();

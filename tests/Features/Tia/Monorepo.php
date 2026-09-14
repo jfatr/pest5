@@ -153,3 +153,40 @@ test('it says when changes outside the project were ignored', function (): void 
     expect($result->exitCode)->toBe(0, $result->describe())
         ->and($result->output)->toContain('1 changed file outside this project was ignored');
 })->skipOnWindows();
+
+test('a change in a sibling package the project autoloads runs the full suite', function (array $arguments): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the sibling package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia', ...$arguments);
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe())
+        ->and($result->tally())->toContain(Project::TOTAL_TESTS.' passed');
+})->with(Project::SEQUENTIAL_AND_PARALLEL)->skipOnWindows();
+
+test('a change in a sibling package the project does not load still replays', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework an unrelated sibling package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->not->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(Project::TOTAL_TESTS, $result->describe());
+})->skipOnWindows();

@@ -1,0 +1,134 @@
+<?php
+
+declare(strict_types=1);
+
+use Pest\Plugins\Tia\ExternalSources;
+use Symfony\Component\Process\Process;
+use Tests\Fixtures\Tia\GitRepo;
+
+/**
+ * @return array<int, string>
+ */
+function tiaExternalRoots(?string $created = null): array
+{
+    static $roots = [];
+
+    if ($created !== null) {
+        $roots[] = $created;
+
+        return $roots;
+    }
+
+    $all = $roots;
+    $roots = [];
+
+    return $all;
+}
+
+/**
+ * @param  array<string, mixed>  $manifest
+ * @return array{root: string, project: string}
+ */
+function tiaExternalRepository(array $manifest = [], ?string $phpunit = null): array
+{
+    $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pest-tia-external-'.bin2hex(random_bytes(8));
+
+    mkdir($root.'/backend/app', 0755, true);
+    mkdir($root.'/packages/shared/src', 0755, true);
+
+    file_put_contents($root.'/backend/app/Service.php', "<?php\n\$service = 1;\n");
+    file_put_contents($root.'/packages/shared/src/Shared.php', "<?php\n\$shared = 1;\n");
+    file_put_contents($root.'/backend/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    if ($phpunit !== null) {
+        file_put_contents($root.'/backend/phpunit.xml', $phpunit);
+    }
+
+    tiaExternalRoots($root);
+
+    new GitRepo($root)->init('master');
+
+    return ['root' => $root, 'project' => $root.'/backend'];
+}
+
+beforeEach(function (): void {
+    ExternalSources::flush();
+});
+
+afterEach(function (): void {
+    foreach (tiaExternalRoots() as $root) {
+        new Process(['rm', '-rf', $root])->run();
+    }
+
+    ExternalSources::flush();
+});
+
+it('finds a psr-4 root that escapes the project', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['App\\' => 'app/', 'Shared\\' => '../packages/shared/src']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/src/']);
+})->skipOnWindows();
+
+it('finds a path repository', function (): void {
+    $repository = tiaExternalRepository([
+        'repositories' => [['type' => 'path', 'url' => '../packages/shared']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/']);
+})->skipOnWindows();
+
+it('finds a phpunit source directory outside the project', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <source>
+    <include>
+      <directory suffix=".php">app</directory>
+      <directory suffix=".php">../packages/shared/src</directory>
+    </include>
+  </source>
+</phpunit>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/src/']);
+})->skipOnWindows();
+
+it('finds nothing when the project only loads its own code', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['App\\' => 'app/'], 'files' => ['app/Service.php']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+})->skipOnWindows();
+
+it('finds nothing for a project at the repository root', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => '../packages/shared/src']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['root']))->toBeEmpty();
+})->skipOnWindows();
+
+it('ignores a root that sits outside the repository altogether', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Tmp\\' => '../../']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+})->skipOnWindows();
+
+it('matches only the changes that fall under an external root', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => '../packages/shared/src']],
+    ]);
+
+    $matched = ExternalSources::matching($repository['project'], [
+        'packages/shared/src/Shared.php',
+        'packages/other/src/Other.php',
+        'frontend/widget.php',
+    ]);
+
+    expect($matched)->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();

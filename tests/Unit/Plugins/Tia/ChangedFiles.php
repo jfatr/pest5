@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Pest\Plugins\Tia\ChangedFiles;
+use Pest\Plugins\Tia\Fingerprint;
 use Symfony\Component\Process\Process;
 use Tests\Fixtures\Tia\GitRepo;
 
@@ -112,4 +113,46 @@ it('leaves a project at the repository root untouched', function (): void {
 
     expect(new ChangedFiles($monorepo['root'])->since($monorepo['sha']))
         ->toBe(['frontend/widget.php']);
+})->skipOnWindows();
+
+it('reports the changes it left outside the project', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['project'].'/app/Service.php', "<?php\n\$service = 2;\n");
+    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
+
+    $changedFiles = new ChangedFiles($monorepo['project']);
+    $changedFiles->since($monorepo['sha']);
+
+    expect($changedFiles->outsideProject())->toBe(['frontend/widget.php']);
+})->skipOnWindows();
+
+it('reports nothing outside the project for a project at the repository root', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
+
+    $changedFiles = new ChangedFiles($monorepo['root']);
+    $changedFiles->since($monorepo['sha']);
+
+    expect($changedFiles->outsideProject())->toBeEmpty();
+})->skipOnWindows();
+
+it('ties a fingerprint to the project location inside the repository', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    mkdir($monorepo['root'].'/admin/app', 0755, true);
+    file_put_contents($monorepo['root'].'/admin/app/Service.php', "<?php\n\$service = 1;\n");
+    $monorepo['repo']->commit('add a second project');
+
+    $nested = Fingerprint::compute($monorepo['project']);
+    $sibling = Fingerprint::compute($monorepo['root'].'/admin');
+    $root = Fingerprint::compute($monorepo['root']);
+
+    expect($nested['structural']['project_prefix'])->toBe('backend/')
+        ->and($sibling['structural']['project_prefix'])->toBe('admin/')
+        ->and($root['structural'])->not->toHaveKey('project_prefix')
+        ->and(Fingerprint::structuralMatches($nested, $sibling))->toBeFalse()
+        ->and(Fingerprint::structuralMatches($nested, $root))->toBeFalse()
+        ->and(Fingerprint::structuralDrift($sibling, $nested))->toContain('project_prefix');
 })->skipOnWindows();

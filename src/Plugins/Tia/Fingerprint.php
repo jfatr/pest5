@@ -30,16 +30,24 @@ final readonly class Fingerprint
      */
     public static function compute(string $projectRoot): array
     {
+        $structural = [
+            'schema' => self::SCHEMA_VERSION,
+            'composer_lock' => self::composerLockHash($projectRoot),
+            'phpunit_xml' => self::trackedHash($projectRoot, 'phpunit.xml'),
+            'phpunit_xml_dist' => self::trackedHash($projectRoot, 'phpunit.xml.dist'),
+            'vite_config' => self::viteConfigHash($projectRoot),
+            'package_lock' => self::packageLockHash($projectRoot),
+            'js_config' => self::jsConfigHash($projectRoot),
+        ];
+
+        $prefix = self::projectPrefix($projectRoot);
+
+        if ($prefix !== '') {
+            $structural['project_prefix'] = $prefix;
+        }
+
         return [
-            'structural' => [
-                'schema' => self::SCHEMA_VERSION,
-                'composer_lock' => self::composerLockHash($projectRoot),
-                'phpunit_xml' => self::trackedHash($projectRoot, 'phpunit.xml'),
-                'phpunit_xml_dist' => self::trackedHash($projectRoot, 'phpunit.xml.dist'),
-                'vite_config' => self::viteConfigHash($projectRoot),
-                'package_lock' => self::packageLockHash($projectRoot),
-                'js_config' => self::jsConfigHash($projectRoot),
-            ],
+            'structural' => $structural,
             'environmental' => [
                 'php_minor' => PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION,
 
@@ -287,6 +295,13 @@ final readonly class Fingerprint
             ->ignoreVCSIgnored(true);
 
         return $cache[$key] = $finder->hasResults();
+    }
+
+    private static function projectPrefix(string $projectRoot): string
+    {
+        static $cache = [];
+
+        return $cache[$projectRoot] ??= new Git($projectRoot)->pathPrefix();
     }
 
     private static function isGitRepository(string $projectRoot): bool

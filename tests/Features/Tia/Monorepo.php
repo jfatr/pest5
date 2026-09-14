@@ -112,3 +112,44 @@ test('two projects in the same repository keep their state apart', function (): 
 
     expect($project->stateDirFor($api))->not->toBe($project->stateDirFor($admin));
 })->skipOnWindows();
+
+test('a nested project fetches the baseline published for it', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $environment = $project->gh('ok', $project->detachGraph());
+
+    $result = $project->pestWithEnvironment($nested, $environment, '--tia', '--baselined');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('Downloading TIA baseline')
+        ->and($result->replayed())->toBe(Project::TOTAL_TESTS, $result->describe());
+})->skipOnWindows();
+
+test('a nested project refuses a baseline published by a sibling project', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    /** @var array<string, mixed> $graph */
+    $graph = json_decode($project->detachGraph(), true);
+    $graph['fingerprint']['structural']['project_prefix'] = 'services/admin/';
+
+    $environment = $project->gh('ok', (string) json_encode($graph, JSON_UNESCAPED_SLASHES));
+
+    $result = $project->pestWithEnvironment($nested, $environment, '--tia', '--baselined');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->tally())->toContain(Project::TOTAL_TESTS.' passed')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('it says when changes outside the project were ignored', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('frontend/widget.php', "<?php\n\n\$widget = 2;\n");
+    $project->git()->commit('rework the sibling');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('1 changed file outside this project was ignored');
+})->skipOnWindows();

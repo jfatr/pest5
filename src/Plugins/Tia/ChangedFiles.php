@@ -16,6 +16,11 @@ final class ChangedFiles
 
     private ?string $gitPrefix = null;
 
+    /**
+     * @var array<string, true>
+     */
+    private array $outsideProject = [];
+
     public function __construct(private readonly string $projectRoot)
     {
         $this->git = new Git($projectRoot);
@@ -43,10 +48,24 @@ final class ChangedFiles
         foreach ($files as $file) {
             if (str_starts_with($file, $prefix)) {
                 $projectFiles[] = substr($file, strlen($prefix));
+
+                continue;
+            }
+
+            if ($file !== '') {
+                $this->outsideProject[$file] = true;
             }
         }
 
         return $projectFiles;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function outsideProject(): array
+    {
+        return array_keys($this->outsideProject);
     }
 
     /**
@@ -125,6 +144,8 @@ final class ChangedFiles
      */
     public function since(?string $sha): ?array
     {
+        $this->outsideProject = [];
+
         $files = [];
 
         if ($sha !== null && $sha !== '') {

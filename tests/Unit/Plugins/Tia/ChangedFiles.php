@@ -156,3 +156,36 @@ it('ties a fingerprint to the project location inside the repository', function 
         ->and(Fingerprint::structuralMatches($nested, $root))->toBeFalse()
         ->and(Fingerprint::structuralDrift($sibling, $nested))->toContain('project_prefix');
 })->skipOnWindows();
+
+it('sees a committed non-ascii path that git would otherwise quote', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    mkdir($monorepo['project'].'/resources/views', 0755, true);
+    file_put_contents($monorepo['project'].'/resources/views/\u{26a1}orders.blade.php', "<div>a</div>\n");
+    $monorepo['repo']->commit('add a lightning view');
+
+    $sha = $monorepo['repo']->sha();
+
+    file_put_contents($monorepo['project'].'/resources/views/\u{26a1}orders.blade.php', "<div>b</div>\n");
+    $monorepo['repo']->commit('reword the lightning view');
+
+    $changedFiles = new ChangedFiles($monorepo['project']);
+
+    expect($changedFiles->since($sha))->toBe(['resources/views/\u{26a1}orders.blade.php'])
+        ->and($changedFiles->outsideProject())->toBeEmpty();
+})->skipOnWindows();
+
+it('sees a committed non-ascii path at the repository root too', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['root'].'/frontend/\u{26a1}widget.php', "<?php\n\$widget = 1;\n");
+    $monorepo['repo']->commit('add a lightning widget');
+
+    $sha = $monorepo['repo']->sha();
+
+    file_put_contents($monorepo['root'].'/frontend/\u{26a1}widget.php', "<?php\n\$widget = 2;\n");
+    $monorepo['repo']->commit('rework the lightning widget');
+
+    expect(new ChangedFiles($monorepo['root'])->since($sha))
+        ->toBe(['frontend/\u{26a1}widget.php']);
+})->skipOnWindows();

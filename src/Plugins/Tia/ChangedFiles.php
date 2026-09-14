@@ -356,13 +356,13 @@ final class ChangedFiles
      */
     private function diffSinceSha(string $sha): array
     {
-        $output = $this->scan()->raw(['diff', '--name-only', '--no-renames', $sha.'..HEAD']);
+        $output = $this->scan()->raw(['diff', '--name-only', '--no-renames', '-z', $sha.'..HEAD']);
 
         if ($output === null) {
             throw new MissingDependency('Tia mode', 'git');
         }
 
-        return $this->toProjectRelative($this->splitLines($output));
+        return $this->toProjectRelative($this->splitRecords($output));
     }
 
     /**
@@ -422,6 +422,21 @@ final class ChangedFiles
         $sha = trim($output);
 
         return $sha === '' ? null : $sha;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function splitRecords(string $output): array
+    {
+        if ($output === '') {
+            return [];
+        }
+
+        return array_values(array_filter(
+            explode("\x00", rtrim($output, "\x00")),
+            static fn (string $record): bool => $record !== '',
+        ));
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pest\Plugins\Tia;
 
 use Pest\Plugins\Tia\Contracts\Lockfile;
+use Pest\Support\Git;
 use Symfony\Component\Finder\Finder;
 
 /**
@@ -275,7 +276,7 @@ final readonly class Fingerprint
             return $cache[$key];
         }
 
-        if (! is_dir($projectRoot.'/.git') && ! is_file($projectRoot.'/.git')) {
+        if (! self::isGitRepository($projectRoot)) {
             return $cache[$key] = true;
         }
 
@@ -286,6 +287,13 @@ final readonly class Fingerprint
             ->ignoreVCSIgnored(true);
 
         return $cache[$key] = $finder->hasResults();
+    }
+
+    private static function isGitRepository(string $projectRoot): bool
+    {
+        static $cache = [];
+
+        return $cache[$projectRoot] ??= new Git($projectRoot)->isRepository();
     }
 
     private static function contentHashOrNull(string $path): ?string

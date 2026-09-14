@@ -4,12 +4,24 @@ declare(strict_types=1);
 
 namespace Pest\Plugins\Tia;
 
+use Pest\Support\Git;
+
 /**
  * @internal
  */
 final class Storage
 {
     private static ?string $directory = null;
+
+    /**
+     * @var array<string, string|null>
+     */
+    private static array $origins = [];
+
+    /**
+     * @var array<string, string>
+     */
+    private static array $prefixes = [];
 
     public static function tempDir(string $projectRoot): string
     {
@@ -102,6 +114,10 @@ final class Storage
         $realpath = @realpath($projectRoot);
         $input = $origin ?? ($realpath === false ? $projectRoot : $realpath);
 
+        if ($origin !== null) {
+            $input .= '/'.self::gitPrefix($projectRoot);
+        }
+
         $hash = substr(hash('sha256', $input), 0, 16);
         $slug = self::slug(basename($projectRoot));
 
@@ -131,23 +147,16 @@ final class Storage
 
     private static function rawOriginUrl(string $projectRoot): ?string
     {
-        $config = $projectRoot.DIRECTORY_SEPARATOR.'.git'.DIRECTORY_SEPARATOR.'config';
-
-        if (! is_file($config)) {
-            return null;
+        if (! array_key_exists($projectRoot, self::$origins)) {
+            self::$origins[$projectRoot] = new Git($projectRoot)->originUrl();
         }
 
-        $raw = @file_get_contents($config);
+        return self::$origins[$projectRoot];
+    }
 
-        if ($raw === false) {
-            return null;
-        }
-
-        if (preg_match('/\[remote "origin"\][^\[]*?url\s*=\s*(\S+)/s', $raw, $match) === 1) {
-            return trim($match[1]);
-        }
-
-        return null;
+    private static function gitPrefix(string $projectRoot): string
+    {
+        return self::$prefixes[$projectRoot] ??= new Git($projectRoot)->pathPrefix();
     }
 
     private static function slug(string $name): string

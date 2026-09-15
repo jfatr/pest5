@@ -231,7 +231,6 @@ final class ChangedFiles
         $this->outsideProject = $this->filterIgnoredWith(
             new Git($repositoryRoot),
             $this->outsideProject,
-            trustIndex: true,
         );
     }
 
@@ -246,20 +245,18 @@ final class ChangedFiles
 
     /**
      * @param  array<string, true>  $candidates
-     * @param  bool  $trustIndex  keeps a tracked path that an ignore rule matches.
      * @return array<string, true>
      */
-    private function filterIgnoredWith(Git $git, array $candidates, bool $trustIndex = false): array
+    private function filterIgnoredWith(Git $git, array $candidates): array
     {
         if ($candidates === []) {
             return $candidates;
         }
 
-        $arguments = $trustIndex
-            ? ['check-ignore', '-z', '--stdin']
-            : ['check-ignore', '--no-index', '-z', '--stdin'];
-
-        $result = $git->result($arguments, implode("\x00", array_keys($candidates)));
+        $result = $git->result(
+            ['check-ignore', '-z', '--stdin'],
+            implode("\x00", array_keys($candidates)),
+        );
 
         if ($result['exitCode'] !== 0 && $result['exitCode'] !== 1) {
             throw new MissingDependency('Tia mode', 'git');

@@ -449,6 +449,14 @@ final class ExternalSources
             }
         }
 
+        foreach ($xml->xpath('testsuites/testsuite') ?: [] as $suite) {
+            $suiteBootstrap = trim((string) ($suite['bootstrap'] ?? ''));
+
+            if ($suiteBootstrap !== '') {
+                self::declare($declarations, $base, $suiteBootstrap, false);
+            }
+        }
+
         foreach ($xml->xpath('php/includePath') ?: [] as $element) {
             $value = trim((string) $element);
 

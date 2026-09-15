@@ -210,3 +210,22 @@ it('keeps a tracked outside change and drops an untracked ignored one', function
 
     expect($changedFiles->outsideProject())->toBe(['frontend/dist/bundle.js']);
 })->skipOnWindows();
+
+it('keeps a tracked project change that the ignore rules match', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['root'].'/.gitignore', "build/\n");
+    mkdir($monorepo['project'].'/build', 0755, true);
+    file_put_contents($monorepo['project'].'/build/Generated.php', "<?php\n\$built = 1;\n");
+    $monorepo['repo']->run(['add', '-f', 'backend/build/Generated.php']);
+    $monorepo['repo']->commit('track a generated file that the ignore rules match');
+
+    $sha = $monorepo['repo']->sha();
+
+    file_put_contents($monorepo['project'].'/build/Generated.php', "<?php\n\$built = 2;\n");
+    file_put_contents($monorepo['project'].'/build/Untracked.php', "<?php\n");
+    $monorepo['repo']->commit('regenerate the file');
+
+    expect(new ChangedFiles($monorepo['project'])->since($sha))
+        ->toBe(['build/Generated.php']);
+})->skipOnWindows();

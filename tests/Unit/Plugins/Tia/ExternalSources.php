@@ -619,3 +619,22 @@ XML_WRAP);
     expect(tiaRootsFrom($repository['project'], $repository['project'], []))
         ->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();
+
+it('finds a bootstrap that a single test suite names', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <testsuites>
+    <testsuite name="unit">
+      <directory suffix="Test.php">./tests</directory>
+    </testsuite>
+    <testsuite name="integration" bootstrap="../packages/shared/bootstrap.php">
+      <directory suffix="Test.php">./tests</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();

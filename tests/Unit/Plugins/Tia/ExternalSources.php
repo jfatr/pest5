@@ -7,6 +7,17 @@ use Pest\Plugins\Tia\Fingerprint;
 use Symfony\Component\Process\Process;
 use Tests\Fixtures\Tia\GitRepo;
 
+function tiaExternalCwd(?string $original = null): string
+{
+    static $cwd = '';
+
+    if ($original !== null) {
+        $cwd = $original;
+    }
+
+    return $cwd;
+}
+
 /**
  * @return array<int, string>
  */
@@ -50,6 +61,8 @@ function tiaExternalRepository(array $manifest = [], ?string $phpunit = null): a
 
     new GitRepo($root)->init('master');
 
+    chdir($root.'/backend');
+
     return ['root' => $root, 'project' => $root.'/backend'];
 }
 
@@ -72,11 +85,33 @@ function tiaRootsFrom(string $workingDirectory, string $projectRoot, array $argu
     }
 }
 
+/**
+ * @param  array<int, string>  $arguments
+ * @return array<int, string>
+ */
+function tiaUnverifiableFrom(string $workingDirectory, string $projectRoot, array $arguments): array
+{
+    $previous = getcwd();
+
+    chdir($workingDirectory);
+
+    try {
+        ExternalSources::flush();
+
+        return ExternalSources::unverifiable($projectRoot, $arguments);
+    } finally {
+        chdir((string) $previous);
+    }
+}
+
 beforeEach(function (): void {
     ExternalSources::flush();
+    tiaExternalCwd((string) getcwd());
 });
 
 afterEach(function (): void {
+    chdir(tiaExternalCwd());
+
     foreach (tiaExternalRoots() as $root) {
         new Process(['rm', '-rf', $root])->run();
     }
@@ -132,12 +167,36 @@ it('finds nothing for a project at the repository root', function (): void {
     expect(ExternalSources::rootsFor($repository['root']))->toBeEmpty();
 })->skipOnWindows();
 
-it('ignores a root that sits outside the repository altogether', function (): void {
+it('reports a root that sits outside the repository as unverifiable', function (): void {
     $repository = tiaExternalRepository([
         'autoload' => ['psr-4' => ['Tmp\\' => '../../']],
     ]);
 
-    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty()
+        ->and(ExternalSources::unverifiable($repository['project']))->not->toBeEmpty();
+})->skipOnWindows();
+
+it('reports nothing unverifiable when every declaration stays inside the repository', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => '../packages/shared/src', 'App\\' => 'app']],
+    ]);
+
+    expect(ExternalSources::unverifiable($repository['project']))->toBeEmpty();
+})->skipOnWindows();
+
+it('reports a bootstrap outside the repository as unverifiable', function (): void {
+    $repository = tiaExternalRepository();
+
+    $outside = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pest-tia-outside-'.bin2hex(random_bytes(8)).'.php';
+    file_put_contents($outside, "<?php\n");
+
+    try {
+        $unverifiable = tiaUnverifiableFrom($repository['project'], $repository['project'], ['--bootstrap', $outside]);
+    } finally {
+        @unlink($outside);
+    }
+
+    expect($unverifiable)->toBe([str_replace(DIRECTORY_SEPARATOR, '/', (string) realpath(dirname($outside))).'/'.basename($outside)]);
 })->skipOnWindows();
 
 it('matches only the changes that fall under an external root', function (): void {

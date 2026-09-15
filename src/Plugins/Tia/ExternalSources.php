@@ -41,7 +41,7 @@ final class ExternalSources
     private const string NO_CONFIGURATION_FLAG = '--no-configuration';
 
     /**
-     * @var array<string, array<int, string>>
+     * @var array<string, array{roots: array<int, string>, unverifiable: array<int, string>}>
      */
     private static array $cache = [];
 
@@ -50,6 +50,24 @@ final class ExternalSources
      * @return array<int, string> repository-relative directory prefixes with a trailing slash, and exact file paths without one.
      */
     public static function rootsFor(string $projectRoot, array $arguments = []): array
+    {
+        return self::resolved($projectRoot, $arguments)['roots'];
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     * @return array<int, string>
+     */
+    public static function unverifiable(string $projectRoot, array $arguments = []): array
+    {
+        return self::resolved($projectRoot, $arguments)['unverifiable'];
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     * @return array{roots: array<int, string>, unverifiable: array<int, string>}
+     */
+    private static function resolved(string $projectRoot, array $arguments): array
     {
         $configurations = self::configurations($projectRoot, $arguments);
 
@@ -151,24 +169,20 @@ final class ExternalSources
     /**
      * @param  array<int, string>  $configurations
      * @param  array<int, string>  $arguments
-     * @return array<int, string>
+     * @return array{roots: array<int, string>, unverifiable: array<int, string>}
      */
     private static function resolve(string $projectRoot, array $configurations, array $arguments): array
     {
         $git = new Git($projectRoot);
-
-        if ($git->pathPrefix() === '') {
-            return [];
-        }
-
         $repositoryRoot = $git->repositoryRoot();
         $project = self::realpath($projectRoot);
 
         if ($repositoryRoot === null || $project === null) {
-            return [];
+            return ['roots' => [], 'unverifiable' => []];
         }
 
         $roots = [];
+        $unverifiable = [];
 
         foreach (self::declarations($projectRoot, $configurations, $arguments) as [$resolved, $isDirectory]) {
             if ($resolved === $project || str_starts_with($resolved, $project.'/')) {
@@ -180,16 +194,21 @@ final class ExternalSources
             } elseif (str_starts_with($resolved, $repositoryRoot.'/')) {
                 $relative = substr($resolved, strlen($repositoryRoot) + 1);
             } else {
+                $unverifiable[$resolved] = true;
+
                 continue;
             }
 
             $roots[$isDirectory && $relative !== '' ? $relative.'/' : $relative] = true;
         }
 
-        $roots = array_keys($roots);
-        sort($roots);
+        $roots = $git->pathPrefix() === '' ? [] : array_keys($roots);
+        $unverifiable = array_keys($unverifiable);
 
-        return $roots;
+        sort($roots);
+        sort($unverifiable);
+
+        return ['roots' => $roots, 'unverifiable' => $unverifiable];
     }
 
     /**

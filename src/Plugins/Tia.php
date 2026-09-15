@@ -1045,6 +1045,25 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             $graph->lastRunTree($this->branch),
         );
 
+        $unverifiable = ExternalSources::unverifiable($projectRoot, $this->originalArguments);
+
+        if ($unverifiable !== []) {
+            $this->renderBadge('WARN', sprintf(
+                'This project loads %d path%s from outside its repository.',
+                count($unverifiable),
+                count($unverifiable) === 1 ? '' : 's',
+            ));
+
+            foreach (array_slice($unverifiable, 0, $this->output->isVerbose() ? count($unverifiable) : 5) as $path) {
+                $this->output->writeln(sprintf('  <fg=gray>%s</>', $path));
+            }
+
+            $this->renderChild('Running the full suite — git reports no change there, so a replay could not stand behind its results.');
+            $this->renderChild('Move what the project loads into the repository to let TIA select tests again.');
+
+            return $arguments;
+        }
+
         $externalChanges = ExternalSources::matching($projectRoot, $outsideProject, $this->originalArguments);
 
         if ($externalChanges !== []) {

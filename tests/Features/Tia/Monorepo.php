@@ -550,3 +550,25 @@ test('a run from the repository root reads the configuration it finds there', fu
     expect($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();
+
+test('a project that loads from outside its repository never replays', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $outside = $project->path().'-outside';
+    mkdir($outside, 0755, true);
+    file_put_contents($outside.'/bootstrap.php', "<?php\n\nrequire '".$nested."/vendor/autoload.php';\n");
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['files'][] = $outside.'/bootstrap.php';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+    $project->git()->commit('load a file from outside the repository');
+    $project->seedFor($nested, 'master');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('from outside its repository')
+        ->and($result->replayed())->toBe(0, $result->describe())
+        ->and($result->tally())->toContain(Project::TOTAL_TESTS.' passed');
+})->skipOnWindows();

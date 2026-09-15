@@ -190,7 +190,7 @@ it('sees a committed non-ascii path at the repository root too', function (): vo
         ->toBe(['frontend/\u{26a1}widget.php']);
 })->skipOnWindows();
 
-it('drops an outside change that the repository ignores', function (): void {
+it('keeps a tracked outside change and drops an untracked ignored one', function (): void {
     $monorepo = tiaMonorepoRepository();
 
     file_put_contents($monorepo['root'].'/.gitignore', "dist/\n");
@@ -202,11 +202,11 @@ it('drops an outside change that the repository ignores', function (): void {
     $sha = $monorepo['repo']->sha();
 
     file_put_contents($monorepo['root'].'/frontend/dist/bundle.js', "var a = 2;\n");
-    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
-    $monorepo['repo']->commit('rebuild the bundle and rework the widget');
+    file_put_contents($monorepo['root'].'/frontend/dist/untracked.js', "var b = 1;\n");
+    $monorepo['repo']->commit('rebuild the bundle');
 
     $changedFiles = new ChangedFiles($monorepo['project']);
     $changedFiles->since($sha);
 
-    expect($changedFiles->outsideProject())->toBe(['frontend/widget.php']);
+    expect($changedFiles->outsideProject())->toBe(['frontend/dist/bundle.js']);
 })->skipOnWindows();

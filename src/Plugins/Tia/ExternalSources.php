@@ -31,7 +31,12 @@ final class ExternalSources
     /**
      * @var list<string>
      */
-    private const array CONFIGURATION_NAMES = ['phpunit.xml', 'phpunit.xml.dist'];
+    private const array CONFIGURATION_NAMES = ['phpunit.xml', 'phpunit.dist.xml', 'phpunit.xml.dist'];
+
+    /**
+     * @var list<string>
+     */
+    private const array FINGERPRINTED_NAMES = ['phpunit.xml', 'phpunit.xml.dist'];
 
     private const string NO_CONFIGURATION_FLAG = '--no-configuration';
 
@@ -95,7 +100,7 @@ final class ExternalSources
             return null;
         }
 
-        foreach (self::CONFIGURATION_NAMES as $name) {
+        foreach (self::FINGERPRINTED_NAMES as $name) {
             if ($selected === self::realpath($projectRoot.DIRECTORY_SEPARATOR.$name)) {
                 return null;
             }
@@ -125,9 +130,22 @@ final class ExternalSources
 
     private static function covers(string $root, string $file): bool
     {
-        return $root === '' || str_ends_with($root, '/')
-            ? str_starts_with($file, $root)
-            : $file === $root;
+        if ($root === '') {
+            return true;
+        }
+
+        $directory = str_ends_with($root, '/');
+        $normalised = $directory ? rtrim($root, '/') : $root;
+
+        if ($file === $normalised) {
+            return true;
+        }
+
+        if ($directory && str_starts_with($file, $root)) {
+            return true;
+        }
+
+        return str_starts_with($normalised, $file.'/');
     }
 
     /**
@@ -180,36 +198,46 @@ final class ExternalSources
      */
     private static function configurations(string $projectRoot, array $arguments): array
     {
-        $files = [];
-
         $values = self::argumentValues($arguments, self::CONFIGURATION_FLAGS);
         $fromArguments = $values === [] ? null : $values[count($values) - 1];
 
         if ($fromArguments !== null) {
             $resolved = self::commandLinePath($projectRoot, $fromArguments);
+            $file = $resolved === null ? null : self::configurationFileAt($resolved);
 
-            if ($resolved !== null && is_file($resolved)) {
-                $files[$resolved] = true;
-            }
-
-            return array_keys($files);
+            return $file === null ? [] : [$file];
         }
 
         if (in_array(self::NO_CONFIGURATION_FLAG, $arguments, true)) {
             return [];
         }
 
+        $workingDirectory = getcwd();
+        $file = self::configurationFileIn($workingDirectory === false ? $projectRoot : $workingDirectory);
+
+        return $file === null ? [] : [$file];
+    }
+
+    private static function configurationFileAt(string $path): ?string
+    {
+        if (is_dir($path)) {
+            return self::configurationFileIn($path);
+        }
+
+        return is_file($path) ? $path : null;
+    }
+
+    private static function configurationFileIn(string $directory): ?string
+    {
         foreach (self::CONFIGURATION_NAMES as $name) {
-            $resolved = self::realpath($projectRoot.DIRECTORY_SEPARATOR.$name);
+            $resolved = self::realpath($directory.DIRECTORY_SEPARATOR.$name);
 
-            if ($resolved !== null) {
-                $files[$resolved] = true;
-
-                break;
+            if ($resolved !== null && is_file($resolved)) {
+                return $resolved;
             }
         }
 
-        return array_keys($files);
+        return null;
     }
 
     /**

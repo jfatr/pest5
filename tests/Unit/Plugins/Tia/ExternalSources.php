@@ -113,7 +113,7 @@ it('finds a phpunit source directory outside the project', function (): void {
 </phpunit>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/src/']);
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))->toBe(['packages/shared/src/']);
 })->skipOnWindows();
 
 it('finds nothing when the project only loads its own code', function (): void {
@@ -176,7 +176,7 @@ it('finds a phpunit bootstrap that escapes the project', function (): void {
 </phpunit>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/bootstrap.php']);
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();
 
 it('keeps a declared root that no longer exists on disk', function (): void {
@@ -216,7 +216,7 @@ it('finds a testsuite directory outside the project', function (): void {
 </phpunit>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project']))->toBe([
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))->toBe([
         'packages/shared/tests/',
         'packages/shared/tests/OneTest.php',
     ]);
@@ -461,7 +461,7 @@ it('finds an include path that the configuration names', function (): void {
 </phpunit>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project']))
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))
         ->toBe(['packages/shared/src/']);
 })->skipOnWindows();
 
@@ -497,4 +497,66 @@ XML_WRAP;
 
     expect($first['structural']['configuration'])->not->toBe($second['structural']['configuration'])
         ->and(Fingerprint::structuralMatches($first, $second))->toBeFalse();
+})->skipOnWindows();
+
+it('matches a submodule that a commit moved', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => '../packages/shared/src']],
+    ]);
+
+    expect(ExternalSources::matching($repository['project'], ['packages/shared']))
+        ->toBe(['packages/shared'])
+        ->and(ExternalSources::matching($repository['project'], ['packages']))
+        ->toBe(['packages'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/other']))
+        ->toBeEmpty();
+})->skipOnWindows();
+
+it('matches a submodule that holds a declared file', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['files' => ['../packages/shared/bootstrap.php']],
+    ]);
+
+    expect(ExternalSources::matching($repository['project'], ['packages/shared']))
+        ->toBe(['packages/shared']);
+})->skipOnWindows();
+
+it('reads the configuration of the directory the command ran in', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    file_put_contents($repository['root'].'/phpunit.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="packages/shared/src/Shared.php"/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['root'], $repository['project'], []))
+        ->toBe(['packages/shared/src/Shared.php', 'phpunit.xml']);
+})->skipOnWindows();
+
+it('reads a configuration that a directory argument names', function (): void {
+    $repository = tiaExternalRepository();
+
+    mkdir($repository['root'].'/config', 0755, true);
+    file_put_contents($repository['root'].'/config/phpunit.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['-c', '../config']))
+        ->toBe(['config/phpunit.xml', 'packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('reads the dist name that phpunit tries before the older one', function (): void {
+    $repository = tiaExternalRepository();
+
+    file_put_contents($repository['project'].'/phpunit.dist.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))
+        ->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();

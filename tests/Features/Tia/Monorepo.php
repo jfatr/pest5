@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Tests\Fixtures\Tia\GitRepo;
 use Tests\Fixtures\Tia\Project;
 
 afterEach(function (): void {
@@ -494,5 +495,58 @@ test('a change under an include path that the configuration names runs the full 
 
     expect($result->exitCode)->toBe(0, $result->describe())
         ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a submodule that a commit moves runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $library = $project->path().'-library';
+    mkdir($library, 0755, true);
+    $libraryRepo = new GitRepo($library);
+    file_put_contents($library.'/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $libraryRepo->init('master');
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->git()->run(['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', $library, 'packages/shared']);
+    $project->git()->commit('add the library as a submodule');
+    $project->seedFor($nested, 'master');
+
+    file_put_contents($library.'/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $libraryRepo->commit('rework the library');
+
+    new GitRepo($project->path('packages/shared'))->run(['-c', 'protocol.file.allow=always', 'pull', '--quiet', 'origin', 'master']);
+    $project->git()->commit('bump the submodule');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a run from the repository root reads the configuration it finds there', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n");
+    $project->write('phpunit.xml', str_replace(
+        'bootstrap="vendor/autoload.php"',
+        'bootstrap="packages/shared/bootstrap.php"',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('add a configuration at the repository root');
+    $project->seedFor($nested, 'master', arguments: ['-c', $project->path('phpunit.xml')]);
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestFrom($nested, $project->path(), '--tia');
+
+    expect($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();

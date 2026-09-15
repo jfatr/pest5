@@ -357,8 +357,6 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
     }
 
     /**
-     * Mirrors {@see HandleArguments::hasArgument()} for
-     *
      * @param  array<int, string>  $arguments
      */
     private static function argumentPresent(string $argument, array $arguments): bool
@@ -440,17 +438,11 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         return $this->cachedAssertionsByTestId[$testId] ?? 0;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public function handleOriginalArguments(array $arguments): void
     {
         $this->originalArguments = $arguments;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public function handleArguments(array $arguments): array
     {
         if ($this->hasArgument(self::BASELINE_PATH_OPTION, $arguments)) {

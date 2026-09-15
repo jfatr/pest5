@@ -104,9 +104,6 @@ final class Storage
         return null;
     }
 
-    /**
-     *      `git@github.com:foo/bar.git`, `ssh://git@github.com/foo/bar`
-     */
     private static function projectKey(string $projectRoot): string
     {
         $origin = self::originIdentity($projectRoot);
@@ -132,12 +129,10 @@ final class Storage
             return null;
         }
 
-        // git@host:org/repo(.git)
         if (preg_match('#^[\w.-]+@([\w.-]+):([\w./-]+?)(?:\.git)?/?$#', $url, $m) === 1) {
             return strtolower($m[1].'/'.$m[2]);
         }
 
-        // scheme://[user@]host[:port]/org/repo(.git)  — https, ssh, git, file
         if (preg_match('#^[a-z]+://(?:[^@/]+@)?([^/:]+)(?::\d+)?/([\w./-]+?)(?:\.git)?/?$#i', $url, $m) === 1) {
             return strtolower($m[1].'/'.$m[2]);
         }

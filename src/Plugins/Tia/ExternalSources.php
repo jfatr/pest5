@@ -19,7 +19,7 @@ final class ExternalSources
     private static array $cache = [];
 
     /**
-     * @return array<int, string>
+     * @return array<int, string> repository-relative directory prefixes with a trailing slash, and exact file paths without one.
      */
     public static function rootsFor(string $projectRoot): array
     {
@@ -27,7 +27,7 @@ final class ExternalSources
     }
 
     /**
-     * @param  array<int, string>  $files  Repository-relative paths.
+     * @param  array<int, string>  $files  repository-relative paths.
      * @return array<int, string>
      */
     public static function matching(string $projectRoot, array $files): array
@@ -42,7 +42,7 @@ final class ExternalSources
 
         foreach ($files as $file) {
             foreach ($roots as $root) {
-                if (str_starts_with($file, $root)) {
+                if (self::covers($root, $file)) {
                     $matched[] = $file;
 
                     break;
@@ -58,6 +58,13 @@ final class ExternalSources
         self::$cache = [];
     }
 
+    private static function covers(string $root, string $file): bool
+    {
+        return str_ends_with($root, '/')
+            ? str_starts_with($file, $root)
+            : $file === $root;
+    }
+
     /**
      * @return array<int, string>
      */
@@ -70,21 +77,16 @@ final class ExternalSources
         }
 
         $repositoryRoot = $git->repositoryRoot();
-
-        if ($repositoryRoot === null) {
-            return [];
-        }
-
         $project = self::realpath($projectRoot);
 
-        if ($project === null) {
+        if ($repositoryRoot === null || $project === null) {
             return [];
         }
 
         $roots = [];
 
-        foreach ([...self::composerPaths($projectRoot), ...self::phpunitSourcePaths($projectRoot)] as $candidate) {
-            $resolved = self::realpath($projectRoot.DIRECTORY_SEPARATOR.$candidate);
+        foreach (self::declarations($projectRoot) as [$path, $isDirectory]) {
+            $resolved = self::lexicalPath($project, $path);
 
             if ($resolved === null) {
                 continue;
@@ -98,7 +100,9 @@ final class ExternalSources
                 continue;
             }
 
-            $roots[substr($resolved, strlen($repositoryRoot) + 1).'/'] = true;
+            $relative = substr($resolved, strlen($repositoryRoot) + 1);
+
+            $roots[$isDirectory ? $relative.'/' : $relative] = true;
         }
 
         $roots = array_keys($roots);
@@ -108,9 +112,20 @@ final class ExternalSources
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, array{0: string, 1: bool}>
      */
-    private static function composerPaths(string $projectRoot): array
+    private static function declarations(string $projectRoot): array
+    {
+        return [
+            ...self::composerDeclarations($projectRoot),
+            ...self::phpunitDeclarations($projectRoot),
+        ];
+    }
+
+    /**
+     * @return array<int, array{0: string, 1: bool}>
+     */
+    private static function composerDeclarations(string $projectRoot): array
     {
         $manifest = self::decodeJson($projectRoot.DIRECTORY_SEPARATOR.'composer.json');
 
@@ -118,7 +133,7 @@ final class ExternalSources
             return [];
         }
 
-        $paths = [];
+        $declarations = [];
 
         foreach (['autoload', 'autoload-dev'] as $section) {
             $autoload = $manifest[$section] ?? null;
@@ -127,7 +142,7 @@ final class ExternalSources
                 continue;
             }
 
-            foreach (['psr-4', 'psr-0', 'classmap', 'files'] as $kind) {
+            foreach (['psr-4' => true, 'psr-0' => true, 'classmap' => null, 'files' => false] as $kind => $isDirectory) {
                 $entries = $autoload[$kind] ?? null;
 
                 if (! is_array($entries)) {
@@ -136,9 +151,11 @@ final class ExternalSources
 
                 foreach ($entries as $entry) {
                     foreach (is_array($entry) ? $entry : [$entry] as $path) {
-                        if (is_string($path) && $path !== '') {
-                            $paths[] = $path;
+                        if (! is_string($path) || $path === '') {
+                            continue;
                         }
+
+                        $declarations[] = [$path, $isDirectory ?? ! self::looksLikeFile($path)];
                     }
                 }
             }
@@ -155,18 +172,18 @@ final class ExternalSources
                 $url = $repository['url'] ?? null;
 
                 if (is_string($url) && $url !== '') {
-                    $paths[] = rtrim(str_replace(['*', '?'], '', $url), '/');
+                    $declarations[] = [rtrim(str_replace(['*', '?'], '', $url), '/'), true];
                 }
             }
         }
 
-        return $paths;
+        return $declarations;
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, array{0: string, 1: bool}>
      */
-    private static function phpunitSourcePaths(string $projectRoot): array
+    private static function phpunitDeclarations(string $projectRoot): array
     {
         foreach (['phpunit.xml', 'phpunit.xml.dist'] as $name) {
             $path = $projectRoot.DIRECTORY_SEPARATOR.$name;
@@ -181,22 +198,35 @@ final class ExternalSources
                 continue;
             }
 
-            $paths = [];
+            $declarations = [];
+
+            $bootstrap = trim((string) ($xml['bootstrap'] ?? ''));
+
+            if ($bootstrap !== '') {
+                $declarations[] = [$bootstrap, false];
+            }
 
             foreach (['source', 'coverage'] as $section) {
-                foreach ($xml->xpath($section.'/include/directory') ?: [] as $directory) {
-                    $value = trim((string) $directory);
+                foreach (['directory' => true, 'file' => false] as $node => $isDirectory) {
+                    foreach ($xml->xpath($section.'/include/'.$node) ?: [] as $element) {
+                        $value = trim((string) $element);
 
-                    if ($value !== '') {
-                        $paths[] = $value;
+                        if ($value !== '') {
+                            $declarations[] = [$value, $isDirectory];
+                        }
                     }
                 }
             }
 
-            return $paths;
+            return $declarations;
         }
 
         return [];
+    }
+
+    private static function looksLikeFile(string $path): bool
+    {
+        return pathinfo($path, PATHINFO_EXTENSION) !== '';
     }
 
     /**
@@ -228,6 +258,34 @@ final class ExternalSources
         }
 
         return $xml === false ? null : $xml;
+    }
+
+    private static function lexicalPath(string $base, string $relative): ?string
+    {
+        $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+        $joined = str_starts_with($relative, '/') ? $relative : $base.'/'.$relative;
+
+        $segments = [];
+
+        foreach (explode('/', $joined) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+
+            if ($segment !== '..') {
+                $segments[] = $segment;
+
+                continue;
+            }
+
+            if ($segments === []) {
+                return null;
+            }
+
+            array_pop($segments);
+        }
+
+        return '/'.implode('/', $segments);
     }
 
     private static function realpath(string $path): ?string

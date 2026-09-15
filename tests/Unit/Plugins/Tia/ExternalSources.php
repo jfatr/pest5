@@ -38,6 +38,7 @@ function tiaExternalRepository(array $manifest = [], ?string $phpunit = null): a
 
     file_put_contents($root.'/backend/app/Service.php', "<?php\n\$service = 1;\n");
     file_put_contents($root.'/packages/shared/src/Shared.php', "<?php\n\$shared = 1;\n");
+    file_put_contents($root.'/packages/shared/bootstrap.php', "<?php\n\$booted = 1;\n");
     file_put_contents($root.'/backend/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
 
     if ($phpunit !== null) {
@@ -131,4 +132,52 @@ it('matches only the changes that fall under an external root', function (): voi
     ]);
 
     expect($matched)->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();
+
+it('finds an autoload file that escapes the project and matches it exactly', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['files' => ['../packages/shared/bootstrap.php']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/bootstrap.php'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared/bootstrap.php']))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('finds a phpunit bootstrap that escapes the project', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php">
+  <source>
+    <include>
+      <directory suffix=".php">app</directory>
+    </include>
+  </source>
+</phpunit>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('keeps a declared root that no longer exists on disk', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => '../packages/shared/src']],
+    ]);
+
+    new Process(['rm', '-rf', $repository['root'].'/packages/shared'])->mustRun();
+
+    ExternalSources::flush();
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/src/'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared/src/Shared.php']))
+        ->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();
+
+it('treats a classmap entry as a file only when it names one', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['classmap' => ['../packages/shared/src', '../packages/shared/bootstrap.php']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))
+        ->toBe(['packages/shared/bootstrap.php', 'packages/shared/src/']);
 })->skipOnWindows();

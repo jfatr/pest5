@@ -190,3 +190,70 @@ test('a change in a sibling package the project does not load still replays', fu
         ->and($result->output)->not->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(Project::TOTAL_TESTS, $result->describe());
 })->skipOnWindows();
+
+test('a change in an autoload file outside the project runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['files'][] = '../packages/shared/bootstrap.php';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\n\$booted = 1;\n");
+    $project->git()->commit('let the project load a sibling bootstrap file');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a change in the phpunit bootstrap outside the project runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n");
+    $project->write('nested/phpunit.xml', str_replace(
+        'bootstrap="vendor/autoload.php"',
+        'bootstrap="../packages/shared/bootstrap.php"',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('point the project at a sibling bootstrap file');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('deleting a declared external package runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+    $project->seedFor($nested, 'master');
+
+    $project->git()->run(['rm', '-r', '--quiet', 'packages/shared']);
+    $project->git()->commit('delete the sibling package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

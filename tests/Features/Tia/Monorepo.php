@@ -473,3 +473,26 @@ test('a change under an include path that the command line names runs the full s
         ->and($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();
+
+test('a change under an include path that the configuration names runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->write('nested/phpunit.xml', str_replace(
+        '</phpunit>',
+        "  <php>\n    <includePath>../packages/shared/src</includePath>\n  </php>\n</phpunit>",
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('point the configuration at a sibling include path');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the sibling package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

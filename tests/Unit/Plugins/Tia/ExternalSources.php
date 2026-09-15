@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Pest\Plugins\Tia\ExternalSources;
+use Pest\Plugins\Tia\Fingerprint;
 use Symfony\Component\Process\Process;
 use Tests\Fixtures\Tia\GitRepo;
 
@@ -408,4 +409,92 @@ XML_WRAP);
 
     expect($withoutArguments)->toBeNull()
         ->and($withArgument)->toBeNull();
+})->skipOnWindows();
+
+it('accepts the configuration argument attached to its short flag', function (): void {
+    $repository = tiaExternalRepository();
+
+    file_put_contents($repository['project'].'/phpunit.ci.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['-cphpunit.ci.xml']))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('reads no configuration when the run asks for none', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], []))
+        ->toBe(['packages/shared/bootstrap.php'])
+        ->and(tiaRootsFrom($repository['project'], $repository['project'], ['--no-configuration']))
+        ->toBeEmpty();
+})->skipOnWindows();
+
+it('reads no default configuration when the command line names one', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    file_put_contents($repository['project'].'/phpunit.ci.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit/>
+XML_WRAP);
+
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['-c', 'phpunit.ci.xml']))
+        ->toBeEmpty();
+})->skipOnWindows();
+
+it('finds an include path that the configuration names', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <php>
+    <includePath>../packages/shared/src</includePath>
+    <includePath>app</includePath>
+  </php>
+</phpunit>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project']))
+        ->toBe(['packages/shared/src/']);
+})->skipOnWindows();
+
+it('reports the path of a configuration inside the repository', function (): void {
+    $repository = tiaExternalRepository();
+
+    expect(ExternalSources::repositoryRelative($repository['project'], $repository['project'].'/composer.json'))
+        ->toBe('backend/composer.json')
+        ->and(ExternalSources::repositoryRelative($repository['project'], sys_get_temp_dir()))
+        ->toBeNull();
+})->skipOnWindows();
+
+it('tells two configurations apart when they hold the same bytes', function (): void {
+    $repository = tiaExternalRepository();
+
+    $xml = <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <testsuites>
+    <testsuite name="default">
+      <directory suffix="Test.php">./tests</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>
+XML_WRAP;
+
+    mkdir($repository['project'].'/config', 0755, true);
+    file_put_contents($repository['project'].'/phpunit.ci.xml', $xml);
+    file_put_contents($repository['project'].'/config/phpunit.ci.xml', $xml);
+
+    $first = Fingerprint::compute($repository['project'], ['-c', $repository['project'].'/phpunit.ci.xml']);
+    $second = Fingerprint::compute($repository['project'], ['-c', $repository['project'].'/config/phpunit.ci.xml']);
+
+    expect($first['structural']['configuration'])->not->toBe($second['structural']['configuration'])
+        ->and(Fingerprint::structuralMatches($first, $second))->toBeFalse();
 })->skipOnWindows();

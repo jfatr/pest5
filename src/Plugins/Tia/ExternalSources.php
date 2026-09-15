@@ -33,6 +33,8 @@ final class ExternalSources
      */
     private const array CONFIGURATION_NAMES = ['phpunit.xml', 'phpunit.xml.dist'];
 
+    private const string NO_CONFIGURATION_FLAG = '--no-configuration';
+
     /**
      * @var array<string, array<int, string>>
      */
@@ -100,6 +102,20 @@ final class ExternalSources
         }
 
         return $selected;
+    }
+
+    public static function repositoryRelative(string $projectRoot, string $path): ?string
+    {
+        $repositoryRoot = new Git($projectRoot)->repositoryRoot();
+        $resolved = self::realpath($path);
+
+        if ($repositoryRoot === null || $resolved === null) {
+            return null;
+        }
+
+        return str_starts_with($resolved, $repositoryRoot.'/')
+            ? substr($resolved, strlen($repositoryRoot) + 1)
+            : null;
     }
 
     public static function flush(): void
@@ -175,6 +191,12 @@ final class ExternalSources
             if ($resolved !== null && is_file($resolved)) {
                 $files[$resolved] = true;
             }
+
+            return array_keys($files);
+        }
+
+        if (in_array(self::NO_CONFIGURATION_FLAG, $arguments, true)) {
+            return [];
         }
 
         foreach (self::CONFIGURATION_NAMES as $name) {
@@ -215,10 +237,21 @@ final class ExternalSources
 
                     continue 2;
                 }
+
+                if (self::isShortFlag($flag) && strlen($argument) > 2 && str_starts_with($argument, $flag)) {
+                    $values[] = substr($argument, 2);
+
+                    continue 2;
+                }
             }
         }
 
         return array_values(array_filter($values, static fn (string $value): bool => $value !== ''));
+    }
+
+    private static function isShortFlag(string $flag): bool
+    {
+        return strlen($flag) === 2 && $flag[0] === '-' && $flag[1] !== '-';
     }
 
     private static function commandLinePath(string $projectRoot, string $path): ?string
@@ -366,6 +399,14 @@ final class ExternalSources
                         self::declare($declarations, $base, $value, $isDirectory);
                     }
                 }
+            }
+        }
+
+        foreach ($xml->xpath('php/includePath') ?: [] as $element) {
+            $value = trim((string) $element);
+
+            if ($value !== '') {
+                self::declare($declarations, $base, $value, true);
             }
         }
 

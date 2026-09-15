@@ -317,7 +317,19 @@ final readonly class Fingerprint
     {
         $configuration = ExternalSources::selectedConfiguration($projectRoot, $arguments);
 
-        return $configuration === null ? null : self::contentHashOrNull($configuration);
+        if ($configuration === null) {
+            return null;
+        }
+
+        $hash = self::contentHashOrNull($configuration);
+
+        if ($hash === null) {
+            return null;
+        }
+
+        $relative = ExternalSources::repositoryRelative($projectRoot, $configuration);
+
+        return ($relative ?? basename($configuration)).':'.$hash;
     }
 
     private static function projectPrefix(string $projectRoot): string

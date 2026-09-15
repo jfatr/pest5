@@ -23,12 +23,13 @@ final readonly class Fingerprint
     ];
 
     /**
+     * @param  array<int, string>  $arguments
      * @return array{
      *     structural: array<string, int|string|null>,
      *     environmental: array<string, int|string|null>,
      * }
      */
-    public static function compute(string $projectRoot): array
+    public static function compute(string $projectRoot, array $arguments = []): array
     {
         $structural = [
             'schema' => self::SCHEMA_VERSION,
@@ -44,6 +45,18 @@ final readonly class Fingerprint
 
         if ($prefix !== '') {
             $structural['project_prefix'] = $prefix;
+        }
+
+        $externalRoots = ExternalSources::rootsFor($projectRoot, $arguments);
+
+        if ($externalRoots !== []) {
+            $structural['external_roots'] = implode("\n", $externalRoots);
+        }
+
+        $configuration = self::selectedConfigurationHash($projectRoot, $arguments);
+
+        if ($configuration !== null) {
+            $structural['configuration'] = $configuration;
         }
 
         return [
@@ -295,6 +308,26 @@ final readonly class Fingerprint
             ->ignoreVCSIgnored(true);
 
         return $cache[$key] = $finder->hasResults();
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     */
+    private static function selectedConfigurationHash(string $projectRoot, array $arguments): ?string
+    {
+        $configuration = ExternalSources::selectedConfiguration($projectRoot, $arguments);
+
+        if ($configuration === null) {
+            return null;
+        }
+
+        foreach (['phpunit.xml', 'phpunit.xml.dist'] as $name) {
+            if ($configuration === @realpath($projectRoot.DIRECTORY_SEPARATOR.$name)) {
+                return null;
+            }
+        }
+
+        return self::contentHashOrNull($configuration);
     }
 
     private static function projectPrefix(string $projectRoot): string

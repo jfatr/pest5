@@ -606,7 +606,7 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         $changedFiles = new ChangedFiles($projectRoot);
         $currentSha = $changedFiles->currentSha();
 
-        $currentFingerprint = Fingerprint::compute($projectRoot);
+        $currentFingerprint = Fingerprint::compute($projectRoot, $this->originalArguments);
 
         if ($this->structuralFingerprintShifted($currentFingerprint)) {
             $this->renderBadge('WARN', 'Project files changed during the run — discarding recorded edges.');
@@ -692,7 +692,7 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         $changedFiles = new ChangedFiles($projectRoot);
         $currentSha = $changedFiles->currentSha();
 
-        $currentFingerprint = Fingerprint::compute($projectRoot);
+        $currentFingerprint = Fingerprint::compute($projectRoot, $this->originalArguments);
 
         if ($this->structuralFingerprintShifted($currentFingerprint)) {
             $this->renderBadge('WARN', 'Project files changed during the run — discarding recorded edges.');
@@ -826,7 +826,7 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
                 : new TiaRequiresRemote);
         }
 
-        $fingerprint = Fingerprint::compute($projectRoot);
+        $fingerprint = Fingerprint::compute($projectRoot, $this->originalArguments);
         $this->startFingerprint = $fingerprint;
 
         if ($forceRebuild && $this->canRebuildGraph()) {
@@ -1045,25 +1045,30 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             $graph->lastRunTree($this->branch),
         );
 
-        $externalChanges = ExternalSources::matching(
-            $projectRoot,
-            $outsideProject,
-            [...$this->originalArguments, ...$arguments],
-        );
+        $externalChanges = ExternalSources::matching($projectRoot, $outsideProject, $this->originalArguments);
 
         if ($externalChanges !== []) {
-            $this->fullSuiteFallbackRan = true;
-
             $this->renderBadge('WARN', sprintf(
                 'Detected changes in %d file%s this project loads from outside its root.',
                 count($externalChanges),
                 count($externalChanges) === 1 ? '' : 's',
             ));
-            $this->renderChild('Running the full suite — the dependency graph only reaches files under the project root.');
 
             foreach (array_slice($externalChanges, 0, $this->output->isVerbose() ? count($externalChanges) : 5) as $file) {
                 $this->output->writeln(sprintf('  <fg=gray>%s</>', $file));
             }
+
+            if ($this->canRebuildGraph()) {
+                $this->deleteState(self::KEY_GRAPH);
+                $this->deleteState(self::KEY_COVERAGE_CACHE);
+
+                $this->freshGraphReason = 'code this project loads from outside its root changed';
+
+                return $this->enterRecordMode($arguments);
+            }
+
+            $this->renderChild('Running the full suite — the dependency graph only reaches files under the project root.');
+            $this->renderChild('The recorded commit stays put, so the next run weighs these files again.');
 
             return $arguments;
         }
@@ -2213,6 +2218,8 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             'pest_factory' => 'Pest internals',
             'pest_method_factory' => 'Pest internals',
             'project_prefix' => 'project location in the repository',
+            'external_roots' => 'the roots this project loads from outside itself',
+            'configuration' => 'the selected PHPUnit configuration',
         ];
 
         $seen = [];

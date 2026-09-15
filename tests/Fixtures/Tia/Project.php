@@ -7,6 +7,7 @@ namespace Tests\Fixtures\Tia;
 use FilesystemIterator;
 use Pest\Plugins\Tia;
 use Pest\Plugins\Tia\ChangedFiles;
+use Pest\Plugins\Tia\ExternalSources;
 use Pest\Plugins\Tia\FileState;
 use Pest\Plugins\Tia\Fingerprint;
 use Pest\Plugins\Tia\Graph;
@@ -207,16 +208,19 @@ final class Project
 
     /**
      * @param  array<int, string>  $failing
+     * @param  array<int, string>  $arguments
      */
-    public function seedFor(string $root, string $branch, bool $sentinel = true, array $failing = []): void
+    public function seedFor(string $root, string $branch, bool $sentinel = true, array $failing = [], array $arguments = []): void
     {
         $this->graphRoot = $root;
+
+        ExternalSources::flush();
 
         $changedFiles = new ChangedFiles($root);
         $sha = new GitRepo($root)->sha();
 
         $graph = new Graph($root);
-        $graph->setFingerprint(Fingerprint::compute($root));
+        $graph->setFingerprint(Fingerprint::compute($root, $arguments));
         $graph->setRecordedAtSha($branch, $sha);
 
         $graph->setLastRunTree($branch, $changedFiles->snapshotTree($changedFiles->since($sha) ?? []));

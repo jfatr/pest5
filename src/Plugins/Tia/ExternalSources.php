@@ -69,6 +69,14 @@ final class ExternalSources
         return $matched;
     }
 
+    /**
+     * @param  array<int, string>  $arguments
+     */
+    public static function selectedConfiguration(string $projectRoot, array $arguments): ?string
+    {
+        return self::configurations($projectRoot, $arguments)[0] ?? null;
+    }
+
     public static function flush(): void
     {
         self::$cache = [];
@@ -135,7 +143,7 @@ final class ExternalSources
         $fromArguments = self::configurationArgument($arguments);
 
         if ($fromArguments !== null) {
-            $resolved = self::realpath($fromArguments) ?? self::absolutePath($projectRoot, $fromArguments);
+            $resolved = self::absolutePath($projectRoot, $fromArguments);
 
             if ($resolved !== null && is_file($resolved)) {
                 $files[$resolved] = true;

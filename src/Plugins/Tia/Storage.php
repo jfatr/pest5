@@ -111,8 +111,10 @@ final class Storage
         $realpath = @realpath($projectRoot);
         $input = $origin ?? ($realpath === false ? $projectRoot : $realpath);
 
-        if ($origin !== null) {
-            $input .= '/'.self::gitPrefix($projectRoot);
+        $prefix = $origin === null ? '' : self::gitPrefix($projectRoot);
+
+        if ($prefix !== '') {
+            $input .= '/'.$prefix;
         }
 
         $hash = substr(hash('sha256', $input), 0, 16);

@@ -82,9 +82,24 @@ final class ExternalSources
     /**
      * @param  array<int, string>  $arguments
      */
+    /**
+     * @param  array<int, string>  $arguments
+     */
     public static function selectedConfiguration(string $projectRoot, array $arguments): ?string
     {
-        return self::configurations($projectRoot, $arguments)[0] ?? null;
+        $selected = self::configurations($projectRoot, $arguments)[0] ?? null;
+
+        if ($selected === null) {
+            return null;
+        }
+
+        foreach (self::CONFIGURATION_NAMES as $name) {
+            if ($selected === self::realpath($projectRoot.DIRECTORY_SEPARATOR.$name)) {
+                return null;
+            }
+        }
+
+        return $selected;
     }
 
     public static function flush(): void
@@ -210,15 +225,7 @@ final class ExternalSources
     {
         $workingDirectory = getcwd();
 
-        if ($workingDirectory !== false) {
-            $resolved = self::absolutePath($workingDirectory, $path);
-
-            if ($resolved !== null && file_exists($resolved)) {
-                return $resolved;
-            }
-        }
-
-        return self::absolutePath($projectRoot, $path);
+        return self::absolutePath($workingDirectory === false ? $projectRoot : $workingDirectory, $path);
     }
 
     /**
@@ -303,7 +310,7 @@ final class ExternalSources
                             continue;
                         }
 
-                        self::declare($declarations, $projectRoot, $path, $isDirectory ?? ! self::looksLikeFile($path));
+                        self::declare($declarations, $projectRoot, $path, $isDirectory);
                     }
                 }
             }
@@ -367,14 +374,21 @@ final class ExternalSources
 
     /**
      * @param  array<int, array{0: string, 1: bool}>  $declarations
+     * @param  bool|null  $isDirectory  `null` where the declaration accepts both, such as a composer classmap entry.
      */
-    private static function declare(array &$declarations, string $base, string $path, bool $isDirectory): void
+    private static function declare(array &$declarations, string $base, string $path, ?bool $isDirectory): void
     {
         $resolved = self::absolutePath($base, $path);
 
-        if ($resolved !== null) {
-            $declarations[] = [$resolved, $isDirectory];
+        if ($resolved === null) {
+            return;
         }
+
+        $isDirectory ??= file_exists($resolved)
+            ? is_dir($resolved)
+            : ! self::looksLikeFile($resolved);
+
+        $declarations[] = [$resolved, $isDirectory];
     }
 
     private static function absolutePath(string $base, string $path): ?string

@@ -52,6 +52,25 @@ function tiaExternalRepository(array $manifest = [], ?string $phpunit = null): a
     return ['root' => $root, 'project' => $root.'/backend'];
 }
 
+/**
+ * @param  array<int, string>  $arguments
+ * @return array<int, string>
+ */
+function tiaRootsFrom(string $workingDirectory, string $projectRoot, array $arguments): array
+{
+    $previous = getcwd();
+
+    chdir($workingDirectory);
+
+    try {
+        ExternalSources::flush();
+
+        return ExternalSources::rootsFor($projectRoot, $arguments);
+    } finally {
+        chdir((string) $previous);
+    }
+}
+
 beforeEach(function (): void {
     ExternalSources::flush();
 });
@@ -257,10 +276,10 @@ it('reads the configuration that the command line selects', function (): void {
 </phpunit>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project'], ['--tia', '-c', 'phpunit.ci.xml']))->toBe([
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['--tia', '-c', 'phpunit.ci.xml']))->toBe([
         'packages/shared/bootstrap.php',
         'packages/shared/tests/',
-    ])->and(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+    ])->and(tiaRootsFrom($repository['project'], $repository['project'], []))->toBeEmpty();
 })->skipOnWindows();
 
 it('accepts the configuration argument in its joined form', function (): void {
@@ -271,7 +290,7 @@ it('accepts the configuration argument in its joined form', function (): void {
 <phpunit bootstrap="../packages/shared/bootstrap.php"/>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project'], ['--configuration=phpunit.ci.xml']))
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['--configuration=phpunit.ci.xml']))
         ->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();
 
@@ -284,7 +303,7 @@ it('resolves a configuration path against its own directory', function (): void 
 <phpunit bootstrap="../packages/shared/bootstrap.php"/>
 XML_WRAP);
 
-    expect(ExternalSources::rootsFor($repository['project'], ['-c', '../config/phpunit.xml']))->toBe([
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['-c', '../config/phpunit.xml']))->toBe([
         'config/phpunit.xml',
         'packages/shared/bootstrap.php',
     ]);
@@ -315,7 +334,7 @@ it('keeps a real directory inside the project out of the roots', function (): vo
 it('finds a bootstrap file that the command line names', function (): void {
     $repository = tiaExternalRepository();
 
-    expect(ExternalSources::rootsFor($repository['project'], ['--bootstrap', '../packages/shared/bootstrap.php']))
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['--bootstrap', '../packages/shared/bootstrap.php']))
         ->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();
 
@@ -324,7 +343,7 @@ it('finds every directory that an include path names', function (): void {
 
     $list = '../packages/shared/src'.PATH_SEPARATOR.'app'.PATH_SEPARATOR.'../packages/shared/tests';
 
-    expect(ExternalSources::rootsFor($repository['project'], ['--include-path', $list]))
+    expect(tiaRootsFrom($repository['project'], $repository['project'], ['--include-path', $list]))
         ->toBe(['packages/shared/src/', 'packages/shared/tests/']);
 })->skipOnWindows();
 
@@ -346,4 +365,47 @@ XML_WRAP);
     }
 
     expect($roots)->toBe(['packages/shared/bootstrap.php', 'phpunit.ci.xml']);
+})->skipOnWindows();
+
+it('keeps a declaration that a commit deleted under the directory the command ran in', function (): void {
+    $repository = tiaExternalRepository();
+
+    new Process(['rm', '-rf', $repository['root'].'/packages'])->mustRun();
+
+    expect(tiaRootsFrom($repository['root'], $repository['project'], ['--bootstrap', 'packages/shared/bootstrap.php']))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('treats a classmap directory that carries a dot as a directory', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['classmap' => ['../packages/shared.core']],
+    ]);
+
+    mkdir($repository['root'].'/packages/shared.core', 0755, true);
+
+    ExternalSources::flush();
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared.core/'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared.core/Service.php']))
+        ->toBe(['packages/shared.core/Service.php']);
+})->skipOnWindows();
+
+it('reports no selected configuration for the phpunit file of the project root', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit/>
+XML_WRAP);
+
+    $previous = getcwd();
+    chdir($repository['project']);
+
+    try {
+        $withoutArguments = ExternalSources::selectedConfiguration($repository['project'], []);
+        $withArgument = ExternalSources::selectedConfiguration($repository['project'], ['-c', 'phpunit.xml']);
+    } finally {
+        chdir((string) $previous);
+    }
+
+    expect($withoutArguments)->toBeNull()
+        ->and($withArgument)->toBeNull();
 })->skipOnWindows();

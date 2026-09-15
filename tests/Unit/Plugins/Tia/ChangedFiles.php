@@ -189,3 +189,24 @@ it('sees a committed non-ascii path at the repository root too', function (): vo
     expect(new ChangedFiles($monorepo['root'])->since($sha))
         ->toBe(['frontend/\u{26a1}widget.php']);
 })->skipOnWindows();
+
+it('drops an outside change that the repository ignores', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['root'].'/.gitignore', "dist/\n");
+    mkdir($monorepo['root'].'/frontend/dist', 0755, true);
+    file_put_contents($monorepo['root'].'/frontend/dist/bundle.js', "var a = 1;\n");
+    $monorepo['repo']->run(['add', '-f', 'frontend/dist/bundle.js']);
+    $monorepo['repo']->commit('track a built bundle that the ignore rules match');
+
+    $sha = $monorepo['repo']->sha();
+
+    file_put_contents($monorepo['root'].'/frontend/dist/bundle.js', "var a = 2;\n");
+    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
+    $monorepo['repo']->commit('rebuild the bundle and rework the widget');
+
+    $changedFiles = new ChangedFiles($monorepo['project']);
+    $changedFiles->since($sha);
+
+    expect($changedFiles->outsideProject())->toBe(['frontend/widget.php']);
+})->skipOnWindows();

@@ -169,6 +169,8 @@ final class ChangedFiles
 
         $candidates = array_keys($this->filterIgnored($unique));
 
+        $this->filterIgnoredOutsideProject();
+
         if ($sha !== null && $sha !== '') {
             return $this->filterBehaviourallyUnchanged($candidates, $sha);
         }
@@ -214,17 +216,44 @@ final class ChangedFiles
         return $this->git->show($sha, $this->gitPrefix().$path);
     }
 
+    private function filterIgnoredOutsideProject(): void
+    {
+        if ($this->outsideProject === []) {
+            return;
+        }
+
+        $repositoryRoot = $this->git->repositoryRoot();
+
+        if ($repositoryRoot === null) {
+            return;
+        }
+
+        $this->outsideProject = $this->filterIgnoredWith(
+            new Git($repositoryRoot),
+            $this->outsideProject,
+        );
+    }
+
     /**
      * @param  array<string, true>  $candidates
      * @return array<string, true>
      */
     private function filterIgnored(array $candidates): array
     {
+        return $this->filterIgnoredWith($this->git, $candidates);
+    }
+
+    /**
+     * @param  array<string, true>  $candidates
+     * @return array<string, true>
+     */
+    private function filterIgnoredWith(Git $git, array $candidates): array
+    {
         if ($candidates === []) {
             return $candidates;
         }
 
-        $result = $this->git->result(
+        $result = $git->result(
             ['check-ignore', '--no-index', '-z', '--stdin'],
             implode("\x00", array_keys($candidates)),
         );

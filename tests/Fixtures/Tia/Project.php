@@ -230,6 +230,28 @@ final class Project
 
         ExternalSources::flush();
 
+        $previous = getcwd();
+
+        if ($previous !== false) {
+            chdir($root);
+        }
+
+        try {
+            $this->seedGraphFor($root, $branch, $sentinel, $failing, $arguments);
+        } finally {
+            if ($previous !== false) {
+                chdir($previous);
+            }
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $failing
+     * @param  array<int, string>  $arguments
+     */
+    private function seedGraphFor(string $root, string $branch, bool $sentinel, array $failing, array $arguments): void
+    {
+
         $changedFiles = new ChangedFiles($root);
         $sha = new GitRepo($root)->sha();
 

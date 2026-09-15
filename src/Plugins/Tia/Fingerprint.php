@@ -317,17 +317,7 @@ final readonly class Fingerprint
     {
         $configuration = ExternalSources::selectedConfiguration($projectRoot, $arguments);
 
-        if ($configuration === null) {
-            return null;
-        }
-
-        foreach (['phpunit.xml', 'phpunit.xml.dist'] as $name) {
-            if ($configuration === @realpath($projectRoot.DIRECTORY_SEPARATOR.$name)) {
-                return null;
-            }
-        }
-
-        return self::contentHashOrNull($configuration);
+        return $configuration === null ? null : self::contentHashOrNull($configuration);
     }
 
     private static function projectPrefix(string $projectRoot): string

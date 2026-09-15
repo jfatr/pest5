@@ -13,16 +13,6 @@ final class Storage
 {
     private static ?string $directory = null;
 
-    /**
-     * @var array<string, string|null>
-     */
-    private static array $origins = [];
-
-    /**
-     * @var array<string, string>
-     */
-    private static array $prefixes = [];
-
     public static function tempDir(string $projectRoot): string
     {
         if (self::$directory !== null) {
@@ -144,16 +134,12 @@ final class Storage
 
     private static function rawOriginUrl(string $projectRoot): ?string
     {
-        if (! array_key_exists($projectRoot, self::$origins)) {
-            self::$origins[$projectRoot] = new Git($projectRoot)->originUrl();
-        }
-
-        return self::$origins[$projectRoot];
+        return new Git($projectRoot)->originUrl();
     }
 
     private static function gitPrefix(string $projectRoot): string
     {
-        return self::$prefixes[$projectRoot] ??= new Git($projectRoot)->pathPrefix();
+        return new Git($projectRoot)->pathPrefix();
     }
 
     private static function slug(string $name): string

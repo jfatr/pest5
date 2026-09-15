@@ -863,6 +863,10 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             }
         }
 
+        if ($this->holdsDirtyExternalSources($projectRoot)) {
+            return $arguments;
+        }
+
         $coverageCacheOwned = $this->piggybackCoverage && $this->pestCoverageActive();
 
         if ($coverageCacheOwned) {
@@ -888,6 +892,39 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         }
 
         return $this->enterRecordMode($arguments);
+    }
+
+    private function holdsDirtyExternalSources(string $projectRoot): bool
+    {
+        $changedFiles = new ChangedFiles($projectRoot);
+        $changedFiles->since(null);
+
+        $dirty = ExternalSources::matching(
+            $projectRoot,
+            $changedFiles->outsideProjectDirty(),
+            $this->originalArguments,
+        );
+
+        if ($dirty === []) {
+            return false;
+        }
+
+        $this->writesSuppressed = true;
+
+        $this->renderBadge('WARN', sprintf(
+            'Detected %d uncommitted change%s this project loads from outside its root.',
+            count($dirty),
+            count($dirty) === 1 ? '' : 's',
+        ));
+
+        foreach (array_slice($dirty, 0, $this->output->isVerbose() ? count($dirty) : 5) as $file) {
+            $this->output->writeln(sprintf('  <fg=gray>%s</>', $file));
+        }
+
+        $this->renderChild('Running the full suite, and recording nothing — git stops reporting such an edit once it is undone.');
+        $this->renderChild('Commit what you changed there to let a run leave a baseline behind.');
+
+        return true;
     }
 
     private function purgeState(): void
@@ -1075,21 +1112,6 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
 
             foreach (array_slice($externalChanges, 0, $this->output->isVerbose() ? count($externalChanges) : 5) as $file) {
                 $this->output->writeln(sprintf('  <fg=gray>%s</>', $file));
-            }
-
-            $dirty = ExternalSources::matching(
-                $projectRoot,
-                $changedFiles->outsideProjectDirty(),
-                $this->originalArguments,
-            );
-
-            if ($dirty !== []) {
-                $this->writesSuppressed = true;
-
-                $this->renderChild('Running the full suite, and recording nothing — git stops reporting an edit outside the project the moment it is undone.');
-                $this->renderChild('Commit what you changed there to let this run leave a baseline behind.');
-
-                return $arguments;
             }
 
             if ($this->canRebuildGraph()) {

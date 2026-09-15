@@ -623,3 +623,46 @@ test('a committed change under a wildcard source directory runs the full suite',
         ->and($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();
+
+test('an uncommitted change outside the project records nothing on a first run', function (array $arguments): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+
+    $project->detachGraph();
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+
+    $result = $project->pestIn($nested, '--tia', ...$arguments);
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('recording nothing')
+        ->and($project->graphExists())->toBeFalse();
+})->with(Project::SEQUENTIAL_AND_PARALLEL)->skipOnWindows();
+
+test('an uncommitted change outside the project records nothing on a fresh run', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+    $project->seedFor($nested, 'master');
+    $project->snapshot();
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+
+    $result = $project->pestIn($nested, '--tia', '--fresh');
+    $delta = $project->delta();
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('recording nothing')
+        ->and($delta->writtenCount())->toBe(0, $delta->summary());
+})->skipOnWindows();

@@ -1045,7 +1045,11 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
             $graph->lastRunTree($this->branch),
         );
 
-        $externalChanges = ExternalSources::matching($projectRoot, $outsideProject);
+        $externalChanges = ExternalSources::matching(
+            $projectRoot,
+            $outsideProject,
+            [...$this->originalArguments, ...$arguments],
+        );
 
         if ($externalChanges !== []) {
             $this->fullSuiteFallbackRan = true;

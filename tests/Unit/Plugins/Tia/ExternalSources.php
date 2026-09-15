@@ -242,3 +242,72 @@ it('covers the whole repository when a declaration reaches its root', function (
         ->and(ExternalSources::matching($repository['project'], ['packages/shared/src/Shared.php']))
         ->toBe(['packages/shared/src/Shared.php']);
 })->skipOnWindows();
+
+it('reads the configuration that the command line selects', function (): void {
+    $repository = tiaExternalRepository();
+
+    file_put_contents($repository['project'].'/phpunit.ci.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php">
+  <testsuites>
+    <testsuite name="default">
+      <directory suffix="Test.php">../packages/shared/tests</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project'], ['--tia', '-c', 'phpunit.ci.xml']))->toBe([
+        'packages/shared/bootstrap.php',
+        'packages/shared/tests/',
+    ])->and(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+})->skipOnWindows();
+
+it('accepts the configuration argument in its joined form', function (): void {
+    $repository = tiaExternalRepository();
+
+    file_put_contents($repository['project'].'/phpunit.ci.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project'], ['--configuration=phpunit.ci.xml']))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('resolves a configuration path against its own directory', function (): void {
+    $repository = tiaExternalRepository();
+
+    mkdir($repository['root'].'/config', 0755, true);
+    file_put_contents($repository['root'].'/config/phpunit.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project'], ['-c', '../config/phpunit.xml']))->toBe([
+        'config/phpunit.xml',
+        'packages/shared/bootstrap.php',
+    ]);
+})->skipOnWindows();
+
+it('follows a symlink that leaves the project', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Shared\\' => 'shared']],
+    ]);
+
+    symlink($repository['root'].'/packages/shared/src', $repository['project'].'/shared');
+
+    ExternalSources::flush();
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/shared/src/'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared/src/Shared.php']))
+        ->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();
+
+it('keeps a real directory inside the project out of the roots', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['App\\' => 'app']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
+})->skipOnWindows();

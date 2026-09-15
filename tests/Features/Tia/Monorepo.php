@@ -303,3 +303,49 @@ test('a change under a wildcard path repository runs the full suite', function (
         ->and($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();
+
+test('a change under a symlink that leaves the project runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = 'shared';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    symlink($project->path('packages/shared/src'), $nested.'/shared');
+    $project->git()->commit('link a sibling package into the project');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the linked package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a change declared only by the configuration argument runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n");
+    $project->write('nested/phpunit.ci.xml', str_replace(
+        'bootstrap="vendor/autoload.php"',
+        'bootstrap="../packages/shared/bootstrap.php"',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('add a second configuration');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia', '-c', 'phpunit.ci.xml');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

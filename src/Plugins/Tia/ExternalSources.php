@@ -14,25 +14,41 @@ use Throwable;
 final class ExternalSources
 {
     /**
+     * @var list<string>
+     */
+    private const array CONFIGURATION_FLAGS = ['-c', '--configuration'];
+
+    /**
+     * @var list<string>
+     */
+    private const array CONFIGURATION_NAMES = ['phpunit.xml', 'phpunit.xml.dist'];
+
+    /**
      * @var array<string, array<int, string>>
      */
     private static array $cache = [];
 
     /**
+     * @param  array<int, string>  $arguments
      * @return array<int, string> repository-relative directory prefixes with a trailing slash, and exact file paths without one.
      */
-    public static function rootsFor(string $projectRoot): array
+    public static function rootsFor(string $projectRoot, array $arguments = []): array
     {
-        return self::$cache[$projectRoot] ??= self::resolve($projectRoot);
+        $configurations = self::configurations($projectRoot, $arguments);
+
+        $key = $projectRoot."\x00".implode("\x00", $configurations);
+
+        return self::$cache[$key] ??= self::resolve($projectRoot, $configurations);
     }
 
     /**
      * @param  array<int, string>  $files  repository-relative paths.
+     * @param  array<int, string>  $arguments
      * @return array<int, string>
      */
-    public static function matching(string $projectRoot, array $files): array
+    public static function matching(string $projectRoot, array $files, array $arguments = []): array
     {
-        $roots = self::rootsFor($projectRoot);
+        $roots = self::rootsFor($projectRoot, $arguments);
 
         if ($roots === []) {
             return [];
@@ -66,9 +82,10 @@ final class ExternalSources
     }
 
     /**
+     * @param  array<int, string>  $configurations
      * @return array<int, string>
      */
-    private static function resolve(string $projectRoot): array
+    private static function resolve(string $projectRoot, array $configurations): array
     {
         $git = new Git($projectRoot);
 
@@ -85,13 +102,7 @@ final class ExternalSources
 
         $roots = [];
 
-        foreach (self::declarations($projectRoot) as [$path, $isDirectory]) {
-            $resolved = self::lexicalPath($project, $path);
-
-            if ($resolved === null) {
-                continue;
-            }
-
+        foreach (self::declarations($projectRoot, $configurations) as [$resolved, $isDirectory]) {
             if ($resolved === $project || str_starts_with($resolved, $project.'/')) {
                 continue;
             }
@@ -114,14 +125,73 @@ final class ExternalSources
     }
 
     /**
+     * @param  array<int, string>  $arguments
+     * @return array<int, string> absolute paths of the configuration files that declare what this project loads.
+     */
+    private static function configurations(string $projectRoot, array $arguments): array
+    {
+        $files = [];
+
+        $fromArguments = self::configurationArgument($arguments);
+
+        if ($fromArguments !== null) {
+            $resolved = self::realpath($fromArguments) ?? self::absolutePath($projectRoot, $fromArguments);
+
+            if ($resolved !== null && is_file($resolved)) {
+                $files[$resolved] = true;
+            }
+        }
+
+        foreach (self::CONFIGURATION_NAMES as $name) {
+            $resolved = self::realpath($projectRoot.DIRECTORY_SEPARATOR.$name);
+
+            if ($resolved !== null) {
+                $files[$resolved] = true;
+
+                break;
+            }
+        }
+
+        return array_keys($files);
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     */
+    private static function configurationArgument(array $arguments): ?string
+    {
+        $count = count($arguments);
+
+        for ($index = 0; $index < $count; $index++) {
+            $argument = $arguments[$index];
+
+            foreach (self::CONFIGURATION_FLAGS as $flag) {
+                if (str_starts_with($argument, $flag.'=')) {
+                    return substr($argument, strlen($flag) + 1);
+                }
+
+                if ($argument === $flag && isset($arguments[$index + 1])) {
+                    return $arguments[$index + 1];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, string>  $configurations
      * @return array<int, array{0: string, 1: bool}>
      */
-    private static function declarations(string $projectRoot): array
+    private static function declarations(string $projectRoot, array $configurations): array
     {
-        return [
-            ...self::composerDeclarations($projectRoot),
-            ...self::phpunitDeclarations($projectRoot),
-        ];
+        $declarations = self::composerDeclarations($projectRoot);
+
+        foreach ($configurations as $configuration) {
+            $declarations = [...$declarations, ...self::phpunitDeclarations($configuration)];
+        }
+
+        return $declarations;
     }
 
     /**
@@ -157,7 +227,7 @@ final class ExternalSources
                             continue;
                         }
 
-                        $declarations[] = [$path, $isDirectory ?? ! self::looksLikeFile($path)];
+                        self::declare($declarations, $projectRoot, $path, $isDirectory ?? ! self::looksLikeFile($path));
                     }
                 }
             }
@@ -174,7 +244,7 @@ final class ExternalSources
                 $url = $repository['url'] ?? null;
 
                 if (is_string($url) && $url !== '') {
-                    $declarations[] = [self::beforeWildcard($url), true];
+                    self::declare($declarations, $projectRoot, self::beforeWildcard($url), true);
                 }
             }
         }
@@ -185,51 +255,61 @@ final class ExternalSources
     /**
      * @return array<int, array{0: string, 1: bool}>
      */
-    private static function phpunitDeclarations(string $projectRoot): array
+    private static function phpunitDeclarations(string $configuration): array
     {
-        foreach (['phpunit.xml', 'phpunit.xml.dist'] as $name) {
-            $path = $projectRoot.DIRECTORY_SEPARATOR.$name;
+        $xml = self::parseXml($configuration);
 
-            if (! is_file($path)) {
-                continue;
-            }
+        if (! $xml instanceof SimpleXMLElement) {
+            return [];
+        }
 
-            $xml = self::parseXml($path);
+        $base = dirname($configuration);
+        $declarations = [[str_replace(DIRECTORY_SEPARATOR, '/', $configuration), false]];
 
-            if (! $xml instanceof SimpleXMLElement) {
-                continue;
-            }
+        $bootstrap = trim((string) ($xml['bootstrap'] ?? ''));
 
-            $declarations = [];
+        if ($bootstrap !== '') {
+            self::declare($declarations, $base, $bootstrap, false);
+        }
 
-            $bootstrap = trim((string) ($xml['bootstrap'] ?? ''));
+        $sections = ['source/include', 'coverage/include', 'testsuites/testsuite'];
 
-            if ($bootstrap !== '') {
-                $declarations[] = [$bootstrap, false];
-            }
+        foreach ($sections as $section) {
+            foreach (['directory' => true, 'file' => false] as $node => $isDirectory) {
+                foreach ($xml->xpath($section.'/'.$node) ?: [] as $element) {
+                    $value = trim((string) $element);
 
-            $sections = [
-                'source/include',
-                'coverage/include',
-                'testsuites/testsuite',
-            ];
-
-            foreach ($sections as $section) {
-                foreach (['directory' => true, 'file' => false] as $node => $isDirectory) {
-                    foreach ($xml->xpath($section.'/'.$node) ?: [] as $element) {
-                        $value = trim((string) $element);
-
-                        if ($value !== '') {
-                            $declarations[] = [$value, $isDirectory];
-                        }
+                    if ($value !== '') {
+                        self::declare($declarations, $base, $value, $isDirectory);
                     }
                 }
             }
-
-            return $declarations;
         }
 
-        return [];
+        return $declarations;
+    }
+
+    /**
+     * @param  array<int, array{0: string, 1: bool}>  $declarations
+     */
+    private static function declare(array &$declarations, string $base, string $path, bool $isDirectory): void
+    {
+        $resolved = self::absolutePath($base, $path);
+
+        if ($resolved !== null) {
+            $declarations[] = [$resolved, $isDirectory];
+        }
+    }
+
+    private static function absolutePath(string $base, string $path): ?string
+    {
+        return self::realpath(self::isAbsolute($path) ? $path : $base.DIRECTORY_SEPARATOR.$path)
+            ?? self::lexicalPath(self::realpath($base) ?? $base, $path);
+    }
+
+    private static function isAbsolute(string $path): bool
+    {
+        return str_starts_with($path, '/') || preg_match('/^[a-z]:[\\\\\/]/i', $path) === 1;
     }
 
     private static function beforeWildcard(string $url): string
@@ -274,6 +354,10 @@ final class ExternalSources
 
     private static function parseXml(string $path): ?SimpleXMLElement
     {
+        if (! is_file($path)) {
+            return null;
+        }
+
         try {
             $xml = @simplexml_load_file($path);
         } catch (Throwable) {
@@ -286,7 +370,7 @@ final class ExternalSources
     private static function lexicalPath(string $base, string $relative): ?string
     {
         $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
-        $joined = str_starts_with($relative, '/') ? $relative : $base.'/'.$relative;
+        $joined = self::isAbsolute($relative) ? $relative : $base.'/'.$relative;
 
         $segments = [];
 

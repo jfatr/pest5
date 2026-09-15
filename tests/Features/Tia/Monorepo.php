@@ -257,3 +257,49 @@ test('deleting a declared external package runs the full suite', function (): vo
         ->and($result->output)->toContain('this project loads from outside its root')
         ->and($result->replayed())->toBe(0, $result->describe());
 })->skipOnWindows();
+
+test('a change in an external test suite runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('shared-tests/support.php', "<?php\n\n\$support = 1;\n");
+
+    $project->write('nested/phpunit.xml', str_replace(
+        '<directory suffix="Test.php">./tests</directory>',
+        '<directory suffix="Test.php">./tests</directory>'."\n".'      <directory suffix="Test.php">../shared-tests</directory>',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('add an external test suite');
+    $project->seedFor($nested, 'master');
+
+    $project->write('shared-tests/support.php', "<?php\n\n\$support = 2;\n");
+    $project->git()->commit('rework the external test suite');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a change under a wildcard path repository runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['repositories'][] = ['type' => 'path', 'url' => '../packages/*/src'];
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('declare a wildcard path repository');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the wildcard package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

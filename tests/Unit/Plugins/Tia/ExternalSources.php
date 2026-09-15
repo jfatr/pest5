@@ -181,3 +181,64 @@ it('treats a classmap entry as a file only when it names one', function (): void
     expect(ExternalSources::rootsFor($repository['project']))
         ->toBe(['packages/shared/bootstrap.php', 'packages/shared/src/']);
 })->skipOnWindows();
+
+it('finds a testsuite directory outside the project', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <testsuites>
+    <testsuite name="default">
+      <directory suffix="Test.php">./tests</directory>
+      <directory suffix="Test.php">../packages/shared/tests</directory>
+      <file>../packages/shared/tests/OneTest.php</file>
+    </testsuite>
+  </testsuites>
+</phpunit>
+XML_WRAP);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe([
+        'packages/shared/tests/',
+        'packages/shared/tests/OneTest.php',
+    ]);
+})->skipOnWindows();
+
+it('keeps the directory before a wildcard in a path repository', function (): void {
+    $repository = tiaExternalRepository([
+        'repositories' => [['type' => 'path', 'url' => '../packages/*/src']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/foo/src/Service.php']))
+        ->toBe(['packages/foo/src/Service.php']);
+})->skipOnWindows();
+
+it('keeps the directory before a single character wildcard', function (): void {
+    $repository = tiaExternalRepository([
+        'repositories' => [['type' => 'path', 'url' => '../packages/lib-?/src']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe(['packages/']);
+})->skipOnWindows();
+
+it('matches a deleted package that a wildcard declared', function (): void {
+    $repository = tiaExternalRepository([
+        'repositories' => [['type' => 'path', 'url' => '../packages/*']],
+    ]);
+
+    new Process(['rm', '-rf', $repository['root'].'/packages/shared'])->mustRun();
+
+    ExternalSources::flush();
+
+    expect(ExternalSources::matching($repository['project'], ['packages/shared/src/Shared.php']))
+        ->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();
+
+it('covers the whole repository when a declaration reaches its root', function (): void {
+    $repository = tiaExternalRepository([
+        'repositories' => [['type' => 'path', 'url' => '../*']],
+    ]);
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBe([''])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared/src/Shared.php']))
+        ->toBe(['packages/shared/src/Shared.php']);
+})->skipOnWindows();

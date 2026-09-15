@@ -60,7 +60,7 @@ final class ExternalSources
 
     private static function covers(string $root, string $file): bool
     {
-        return str_ends_with($root, '/')
+        return $root === '' || str_ends_with($root, '/')
             ? str_starts_with($file, $root)
             : $file === $root;
     }
@@ -96,13 +96,15 @@ final class ExternalSources
                 continue;
             }
 
-            if (! str_starts_with($resolved, $repositoryRoot.'/')) {
+            if ($resolved === $repositoryRoot) {
+                $relative = '';
+            } elseif (str_starts_with($resolved, $repositoryRoot.'/')) {
+                $relative = substr($resolved, strlen($repositoryRoot) + 1);
+            } else {
                 continue;
             }
 
-            $relative = substr($resolved, strlen($repositoryRoot) + 1);
-
-            $roots[$isDirectory ? $relative.'/' : $relative] = true;
+            $roots[$isDirectory && $relative !== '' ? $relative.'/' : $relative] = true;
         }
 
         $roots = array_keys($roots);
@@ -172,7 +174,7 @@ final class ExternalSources
                 $url = $repository['url'] ?? null;
 
                 if (is_string($url) && $url !== '') {
-                    $declarations[] = [rtrim(str_replace(['*', '?'], '', $url), '/'), true];
+                    $declarations[] = [self::beforeWildcard($url), true];
                 }
             }
         }
@@ -206,9 +208,15 @@ final class ExternalSources
                 $declarations[] = [$bootstrap, false];
             }
 
-            foreach (['source', 'coverage'] as $section) {
+            $sections = [
+                'source/include',
+                'coverage/include',
+                'testsuites/testsuite',
+            ];
+
+            foreach ($sections as $section) {
                 foreach (['directory' => true, 'file' => false] as $node => $isDirectory) {
-                    foreach ($xml->xpath($section.'/include/'.$node) ?: [] as $element) {
+                    foreach ($xml->xpath($section.'/'.$node) ?: [] as $element) {
                         $value = trim((string) $element);
 
                         if ($value !== '') {
@@ -222,6 +230,21 @@ final class ExternalSources
         }
 
         return [];
+    }
+
+    private static function beforeWildcard(string $url): string
+    {
+        $segments = [];
+
+        foreach (explode('/', str_replace(DIRECTORY_SEPARATOR, '/', $url)) as $segment) {
+            if (str_contains($segment, '*') || str_contains($segment, '?')) {
+                break;
+            }
+
+            $segments[] = $segment;
+        }
+
+        return rtrim(implode('/', $segments), '/');
     }
 
     private static function looksLikeFile(string $path): bool

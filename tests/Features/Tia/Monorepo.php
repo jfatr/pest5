@@ -666,3 +666,33 @@ test('an uncommitted change outside the project records nothing on a fresh run',
         ->and($result->output)->toContain('recording nothing')
         ->and($delta->writtenCount())->toBe(0, $delta->summary());
 })->skipOnWindows();
+
+test('an uncommitted change outside the project records no result on a partial run', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+    $project->seedFor($nested, 'master', failing: ['adds two numbers']);
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->snapshot();
+
+    $dirty = $project->pestIn($nested, '--tia', '--filter=adds two numbers');
+    $delta = $project->delta();
+
+    expect($dirty->tally())->toContain('1 passed')
+        ->and($delta->writtenCount())->toBe(0, $delta->summary());
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->snapshot();
+
+    $clean = $project->pestIn($nested, '--tia', '--filter=adds two numbers');
+    $delta = $project->delta();
+
+    expect($clean->tally())->toContain('1 passed')
+        ->and($delta->writtenCount())->toBe(1, $delta->summary());
+})->skipOnWindows();

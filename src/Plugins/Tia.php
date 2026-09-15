@@ -190,6 +190,9 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
 
     private bool $writesSuppressed = false;
 
+    /** @var array<int, string>|null */
+    private ?array $dirtyExternalSources = null;
+
     private bool $resultsOnlyWrites = false;
 
     private bool $flushesWorkerResults = false;
@@ -896,14 +899,7 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
 
     private function holdsDirtyExternalSources(string $projectRoot): bool
     {
-        $changedFiles = new ChangedFiles($projectRoot);
-        $changedFiles->since(null);
-
-        $dirty = ExternalSources::matching(
-            $projectRoot,
-            $changedFiles->outsideProjectDirty(),
-            $this->originalArguments,
-        );
+        $dirty = $this->dirtyExternalSources($projectRoot);
 
         if ($dirty === []) {
             return false;
@@ -925,6 +921,30 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         $this->renderChild('Commit what you changed there to let a run leave a baseline behind.');
 
         return true;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function dirtyExternalSources(string $projectRoot): array
+    {
+        if ($this->dirtyExternalSources !== null) {
+            return $this->dirtyExternalSources;
+        }
+
+        $changedFiles = new ChangedFiles($projectRoot);
+
+        try {
+            $changedFiles->since(null);
+        } catch (MissingDependency) {
+            return $this->dirtyExternalSources = [];
+        }
+
+        return $this->dirtyExternalSources = ExternalSources::matching(
+            $projectRoot,
+            $changedFiles->outsideProjectDirty(),
+            $this->originalArguments,
+        );
     }
 
     private function purgeState(): void
@@ -1895,6 +1915,12 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
         $graph = $this->loadGraph($projectRoot);
 
         if (! $graph instanceof Graph) {
+            return;
+        }
+
+        if ($this->dirtyExternalSources($projectRoot) !== []) {
+            $collector->reset();
+
             return;
         }
 

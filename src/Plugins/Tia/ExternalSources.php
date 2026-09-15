@@ -107,9 +107,6 @@ final class ExternalSources
     /**
      * @param  array<int, string>  $arguments
      */
-    /**
-     * @param  array<int, string>  $arguments
-     */
     public static function selectedConfiguration(string $projectRoot, array $arguments): ?string
     {
         $selected = self::configurations($projectRoot, $arguments)[0] ?? null;
@@ -118,13 +115,21 @@ final class ExternalSources
             return null;
         }
 
-        foreach (self::FINGERPRINTED_NAMES as $name) {
-            if ($selected === self::realpath($projectRoot.DIRECTORY_SEPARATOR.$name)) {
-                return null;
-            }
+        if ($selected === self::configurationFileIn($projectRoot) && in_array(basename($selected), self::FINGERPRINTED_NAMES, true)) {
+            return null;
         }
 
         return $selected;
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     */
+    public static function suppressesConfiguration(string $projectRoot, array $arguments): bool
+    {
+        return self::configurations($projectRoot, $arguments) === []
+            && in_array(self::NO_CONFIGURATION_FLAG, $arguments, true)
+            && self::configurationFileIn($projectRoot) !== null;
     }
 
     public static function repositoryRelative(string $projectRoot, string $path): ?string

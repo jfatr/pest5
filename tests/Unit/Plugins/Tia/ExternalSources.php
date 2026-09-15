@@ -470,6 +470,46 @@ XML_WRAP);
         ->and($withArgument)->toBeNull();
 })->skipOnWindows();
 
+it('tells the dist configuration apart from the one phpunit selects by default', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit/>
+XML_WRAP);
+
+    file_put_contents($repository['project'].'/phpunit.xml.dist', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    $default = Fingerprint::compute($repository['project'], []);
+    $dist = Fingerprint::compute($repository['project'], ['-c', 'phpunit.xml.dist']);
+
+    expect($default['structural'])->not->toHaveKey('configuration')
+        ->and($dist['structural']['configuration'])->toStartWith('backend/phpunit.xml.dist:')
+        ->and(Fingerprint::structuralMatches($default, $dist))->toBeFalse();
+})->skipOnWindows();
+
+it('tells a run without configuration apart from the default one', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    $default = Fingerprint::compute($repository['project'], []);
+    $none = Fingerprint::compute($repository['project'], ['--no-configuration']);
+
+    expect($default['structural'])->not->toHaveKey('configuration')
+        ->and($none['structural']['configuration'])->toBe('none')
+        ->and(Fingerprint::structuralMatches($default, $none))->toBeFalse();
+})->skipOnWindows();
+
+it('reports no run without configuration for a project that holds none', function (): void {
+    $repository = tiaExternalRepository();
+
+    expect(Fingerprint::compute($repository['project'], ['--no-configuration'])['structural'])
+        ->not->toHaveKey('configuration');
+})->skipOnWindows();
+
 it('accepts the configuration argument attached to its short flag', function (): void {
     $repository = tiaExternalRepository();
 

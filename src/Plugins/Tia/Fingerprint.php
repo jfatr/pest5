@@ -315,6 +315,10 @@ final readonly class Fingerprint
      */
     private static function selectedConfigurationHash(string $projectRoot, array $arguments): ?string
     {
+        if (ExternalSources::suppressesConfiguration($projectRoot, $arguments)) {
+            return 'none';
+        }
+
         $configuration = ExternalSources::selectedConfiguration($projectRoot, $arguments);
 
         if ($configuration === null) {

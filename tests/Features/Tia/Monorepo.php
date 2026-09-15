@@ -414,3 +414,62 @@ test('an external change keeps the recorded commit until the edges are refreshed
         ->and($second->output)->toContain('this project loads from outside its root')
         ->and($second->replayed())->toBe(0, $second->describe());
 })->skipOnWindows();
+
+test('a relative configuration path resolves against the directory the command ran in', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n");
+    $project->write('nested/phpunit.ci.xml', str_replace(
+        'bootstrap="vendor/autoload.php"',
+        'bootstrap="../packages/shared/bootstrap.php"',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->git()->commit('add a second configuration');
+    $project->seedFor($nested, 'master', arguments: ['-c', $project->path('nested/phpunit.ci.xml')]);
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestFrom($nested, $project->path(), '--tia', '-c', 'nested/phpunit.ci.xml');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a change in a bootstrap file that the command line names runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n");
+    $project->git()->commit('add a sibling bootstrap file');
+    $project->seedFor($nested, 'master', arguments: ['--bootstrap', '../packages/shared/bootstrap.php']);
+
+    $project->write('packages/shared/bootstrap.php', "<?php\n\nrequire __DIR__.'/../../nested/vendor/autoload.php';\n\n\$booted = 2;\n");
+    $project->git()->commit('rework the sibling bootstrap file');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia', '--bootstrap', '../packages/shared/bootstrap.php');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();
+
+test('a change under an include path that the command line names runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('add a sibling package');
+    $project->seedFor($nested, 'master', arguments: ['--include-path', '../packages/shared/src']);
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the sibling package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia', '--include-path', '../packages/shared/src');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

@@ -21,6 +21,16 @@ final class ExternalSources
     /**
      * @var list<string>
      */
+    private const array BOOTSTRAP_FLAGS = ['--bootstrap'];
+
+    /**
+     * @var list<string>
+     */
+    private const array INCLUDE_PATH_FLAGS = ['--include-path'];
+
+    /**
+     * @var list<string>
+     */
     private const array CONFIGURATION_NAMES = ['phpunit.xml', 'phpunit.xml.dist'];
 
     /**
@@ -36,9 +46,9 @@ final class ExternalSources
     {
         $configurations = self::configurations($projectRoot, $arguments);
 
-        $key = $projectRoot."\x00".implode("\x00", $configurations);
+        $key = $projectRoot."\x00".implode("\x00", [...$configurations, ...$arguments]);
 
-        return self::$cache[$key] ??= self::resolve($projectRoot, $configurations);
+        return self::$cache[$key] ??= self::resolve($projectRoot, $configurations, $arguments);
     }
 
     /**
@@ -91,9 +101,10 @@ final class ExternalSources
 
     /**
      * @param  array<int, string>  $configurations
+     * @param  array<int, string>  $arguments
      * @return array<int, string>
      */
-    private static function resolve(string $projectRoot, array $configurations): array
+    private static function resolve(string $projectRoot, array $configurations, array $arguments): array
     {
         $git = new Git($projectRoot);
 
@@ -110,7 +121,7 @@ final class ExternalSources
 
         $roots = [];
 
-        foreach (self::declarations($projectRoot, $configurations) as [$resolved, $isDirectory]) {
+        foreach (self::declarations($projectRoot, $configurations, $arguments) as [$resolved, $isDirectory]) {
             if ($resolved === $project || str_starts_with($resolved, $project.'/')) {
                 continue;
             }
@@ -140,10 +151,11 @@ final class ExternalSources
     {
         $files = [];
 
-        $fromArguments = self::configurationArgument($arguments);
+        $values = self::argumentValues($arguments, self::CONFIGURATION_FLAGS);
+        $fromArguments = $values === [] ? null : $values[count($values) - 1];
 
         if ($fromArguments !== null) {
-            $resolved = self::absolutePath($projectRoot, $fromArguments);
+            $resolved = self::commandLinePath($projectRoot, $fromArguments);
 
             if ($resolved !== null && is_file($resolved)) {
                 $files[$resolved] = true;
@@ -165,38 +177,94 @@ final class ExternalSources
 
     /**
      * @param  array<int, string>  $arguments
+     * @param  list<string>  $flags
+     * @return array<int, string>
      */
-    private static function configurationArgument(array $arguments): ?string
+    private static function argumentValues(array $arguments, array $flags): array
     {
+        $values = [];
         $count = count($arguments);
 
         for ($index = 0; $index < $count; $index++) {
             $argument = $arguments[$index];
 
-            foreach (self::CONFIGURATION_FLAGS as $flag) {
+            foreach ($flags as $flag) {
                 if (str_starts_with($argument, $flag.'=')) {
-                    return substr($argument, strlen($flag) + 1);
+                    $values[] = substr($argument, strlen($flag) + 1);
+
+                    continue 2;
                 }
 
                 if ($argument === $flag && isset($arguments[$index + 1])) {
-                    return $arguments[$index + 1];
+                    $values[] = $arguments[$index + 1];
+
+                    continue 2;
                 }
             }
         }
 
-        return null;
+        return array_values(array_filter($values, static fn (string $value): bool => $value !== ''));
+    }
+
+    private static function commandLinePath(string $projectRoot, string $path): ?string
+    {
+        $workingDirectory = getcwd();
+
+        if ($workingDirectory !== false) {
+            $resolved = self::absolutePath($workingDirectory, $path);
+
+            if ($resolved !== null && file_exists($resolved)) {
+                return $resolved;
+            }
+        }
+
+        return self::absolutePath($projectRoot, $path);
     }
 
     /**
      * @param  array<int, string>  $configurations
+     * @param  array<int, string>  $arguments
      * @return array<int, array{0: string, 1: bool}>
      */
-    private static function declarations(string $projectRoot, array $configurations): array
+    private static function declarations(string $projectRoot, array $configurations, array $arguments): array
     {
         $declarations = self::composerDeclarations($projectRoot);
 
         foreach ($configurations as $configuration) {
             $declarations = [...$declarations, ...self::phpunitDeclarations($configuration)];
+        }
+
+        return [...$declarations, ...self::argumentDeclarations($projectRoot, $arguments)];
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     * @return array<int, array{0: string, 1: bool}>
+     */
+    private static function argumentDeclarations(string $projectRoot, array $arguments): array
+    {
+        $declarations = [];
+
+        foreach (self::argumentValues($arguments, self::BOOTSTRAP_FLAGS) as $bootstrap) {
+            $resolved = self::commandLinePath($projectRoot, $bootstrap);
+
+            if ($resolved !== null) {
+                $declarations[] = [$resolved, false];
+            }
+        }
+
+        foreach (self::argumentValues($arguments, self::INCLUDE_PATH_FLAGS) as $list) {
+            foreach (explode(PATH_SEPARATOR, $list) as $path) {
+                if ($path === '') {
+                    continue;
+                }
+
+                $resolved = self::commandLinePath($projectRoot, $path);
+
+                if ($resolved !== null) {
+                    $declarations[] = [$resolved, true];
+                }
+            }
         }
 
         return $declarations;

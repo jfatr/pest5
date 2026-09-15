@@ -160,14 +160,28 @@ final class Project
         return $this->pestWithEnvironment($directory, [], ...$arguments);
     }
 
+    public function pestFrom(string $directory, string $workingDirectory, string ...$arguments): PestResult
+    {
+        return $this->run($directory, $workingDirectory, [], array_values($arguments));
+    }
+
     /**
      * @param  array<string, string|false>  $environment
      */
     public function pestWithEnvironment(string $directory, array $environment, string ...$arguments): PestResult
     {
+        return $this->run($directory, $directory, $environment, array_values($arguments));
+    }
+
+    /**
+     * @param  array<string, string|false>  $environment
+     * @param  array<int, string>  $arguments
+     */
+    private function run(string $directory, string $workingDirectory, array $environment, array $arguments): PestResult
+    {
         $process = new Process(
             [PHP_BINARY, $directory.'/vendor/pestphp/pest/bin/pest', ...$arguments],
-            $directory,
+            $workingDirectory,
             [
                 ...GitRepo::ENV,
                 'COLLISION_PRINTER' => 'DefaultPrinter',
@@ -192,7 +206,7 @@ final class Project
         $process->run();
 
         return new PestResult(
-            array_values($arguments),
+            $arguments,
             $process->getOutput().$process->getErrorOutput(),
             (int) $process->getExitCode(),
         );

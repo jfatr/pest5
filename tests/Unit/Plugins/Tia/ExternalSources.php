@@ -311,3 +311,39 @@ it('keeps a real directory inside the project out of the roots', function (): vo
 
     expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty();
 })->skipOnWindows();
+
+it('finds a bootstrap file that the command line names', function (): void {
+    $repository = tiaExternalRepository();
+
+    expect(ExternalSources::rootsFor($repository['project'], ['--bootstrap', '../packages/shared/bootstrap.php']))
+        ->toBe(['packages/shared/bootstrap.php']);
+})->skipOnWindows();
+
+it('finds every directory that an include path names', function (): void {
+    $repository = tiaExternalRepository();
+
+    $list = '../packages/shared/src'.PATH_SEPARATOR.'app'.PATH_SEPARATOR.'../packages/shared/tests';
+
+    expect(ExternalSources::rootsFor($repository['project'], ['--include-path', $list]))
+        ->toBe(['packages/shared/src/', 'packages/shared/tests/']);
+})->skipOnWindows();
+
+it('resolves a command line path against the directory the command ran in', function (): void {
+    $repository = tiaExternalRepository();
+
+    file_put_contents($repository['root'].'/phpunit.ci.xml', <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="packages/shared/bootstrap.php"/>
+XML_WRAP);
+
+    $previous = getcwd();
+    chdir($repository['root']);
+
+    try {
+        $roots = ExternalSources::rootsFor($repository['project'], ['-c', 'phpunit.ci.xml']);
+    } finally {
+        chdir((string) $previous);
+    }
+
+    expect($roots)->toBe(['packages/shared/bootstrap.php', 'phpunit.ci.xml']);
+})->skipOnWindows();

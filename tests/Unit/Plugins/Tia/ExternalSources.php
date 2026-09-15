@@ -638,3 +638,38 @@ XML_WRAP);
     expect(tiaRootsFrom($repository['project'], $repository['project'], []))
         ->toBe(['packages/shared/bootstrap.php']);
 })->skipOnWindows();
+
+it('watches the directory before a wildcard that a configuration names', function (): void {
+    $repository = tiaExternalRepository([], <<<'XML_WRAP'
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+  <source>
+    <include>
+      <directory suffix=".php">../packages/*/src</directory>
+    </include>
+  </source>
+</phpunit>
+XML_WRAP);
+
+    $roots = tiaRootsFrom($repository['project'], $repository['project'], []);
+
+    expect($roots)->toBe(['packages/'])
+        ->and(ExternalSources::matching($repository['project'], ['packages/shared/src/Service.php']))
+        ->toBe(['packages/shared/src/Service.php']);
+})->skipOnWindows();
+
+it('reports a root that the repository ignores as unverifiable', function (): void {
+    $repository = tiaExternalRepository([
+        'autoload' => ['psr-4' => ['Generated\\' => '../packages/generated']],
+    ]);
+
+    mkdir($repository['root'].'/packages/generated', 0755, true);
+    file_put_contents($repository['root'].'/.gitignore', "packages/generated/\n");
+    file_put_contents($repository['root'].'/packages/generated/Model.php', "<?php\n");
+
+    ExternalSources::flush();
+
+    expect(ExternalSources::rootsFor($repository['project']))->toBeEmpty()
+        ->and(ExternalSources::unverifiable($repository['project']))
+        ->toContain(str_replace(DIRECTORY_SEPARATOR, '/', (string) realpath($repository['root'])).'/packages/generated');
+})->skipOnWindows();

@@ -229,3 +229,33 @@ it('keeps a tracked project change that the ignore rules match', function (): vo
     expect(new ChangedFiles($monorepo['project'])->since($sha))
         ->toBe(['build/Generated.php']);
 })->skipOnWindows();
+
+it('reads committed paths from the repository root even when git is told to be relative', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    $monorepo['repo']->run(['config', 'diff.relative', 'true']);
+
+    file_put_contents($monorepo['project'].'/app/Service.php', "<?php\n\$service = 2;\n");
+    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
+    $monorepo['repo']->commit('rework both sides');
+
+    $changedFiles = new ChangedFiles($monorepo['project']);
+
+    expect($changedFiles->since($monorepo['sha']))->toBe(['app/Service.php'])
+        ->and($changedFiles->outsideProject())->toBe(['frontend/widget.php']);
+})->skipOnWindows();
+
+it('tells a working tree change outside the project from a committed one', function (): void {
+    $monorepo = tiaMonorepoRepository();
+
+    file_put_contents($monorepo['root'].'/frontend/widget.php', "<?php\n\$widget = 2;\n");
+    $monorepo['repo']->commit('rework the widget');
+
+    file_put_contents($monorepo['root'].'/frontend/other.php', "<?php\n\$other = 1;\n");
+
+    $changedFiles = new ChangedFiles($monorepo['project']);
+    $changedFiles->since($monorepo['sha']);
+
+    expect($changedFiles->outsideProject())->toBe(['frontend/widget.php', 'frontend/other.php'])
+        ->and($changedFiles->outsideProjectDirty())->toBe(['frontend/other.php']);
+})->skipOnWindows();

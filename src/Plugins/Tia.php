@@ -1077,6 +1077,21 @@ final class Tia implements AddsOutput, HandlesArguments, HandlesOriginalArgument
                 $this->output->writeln(sprintf('  <fg=gray>%s</>', $file));
             }
 
+            $dirty = ExternalSources::matching(
+                $projectRoot,
+                $changedFiles->outsideProjectDirty(),
+                $this->originalArguments,
+            );
+
+            if ($dirty !== []) {
+                $this->writesSuppressed = true;
+
+                $this->renderChild('Running the full suite, and recording nothing — git stops reporting an edit outside the project the moment it is undone.');
+                $this->renderChild('Commit what you changed there to let this run leave a baseline behind.');
+
+                return $arguments;
+            }
+
             if ($this->canRebuildGraph()) {
                 $this->deleteState(self::KEY_GRAPH);
                 $this->deleteState(self::KEY_COVERAGE_CACHE);

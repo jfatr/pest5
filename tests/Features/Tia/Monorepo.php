@@ -572,3 +572,54 @@ test('a project that loads from outside its repository never replays', function 
         ->and($result->replayed())->toBe(0, $result->describe())
         ->and($result->tally())->toContain(Project::TOTAL_TESTS.' passed');
 })->skipOnWindows();
+
+test('an uncommitted change outside the project records nothing', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $manifest = json_decode((string) file_get_contents($nested.'/composer.json'), true);
+    $manifest['autoload']['psr-4']['Shared\\'] = '../packages/shared/src';
+    $project->write('nested/composer.json', (string) json_encode($manifest, JSON_PRETTY_PRINT));
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('let the project load a sibling package');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->snapshot();
+
+    $dirty = $project->pestIn($nested, '--tia');
+    $delta = $project->delta();
+
+    expect($dirty->output)->toContain('recording nothing')
+        ->and($dirty->replayed())->toBe(0, $dirty->describe())
+        ->and($delta->writtenCount())->toBe(0, $delta->summary());
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+
+    $restored = $project->pestIn($nested, '--tia');
+
+    expect($restored->replayed())->toBe(Project::TOTAL_TESTS, $restored->describe());
+})->skipOnWindows();
+
+test('a committed change under a wildcard source directory runs the full suite', function (): void {
+    [$project, $nested] = tiaMonorepo();
+
+    $project->write('nested/phpunit.xml', str_replace(
+        '<directory suffix=".php">./app</directory>',
+        '<directory suffix=".php">./app</directory>'."\n".'      <directory suffix=".php">../packages/*/src</directory>',
+        (string) file_get_contents($nested.'/phpunit.xml'),
+    ));
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 1;\n");
+    $project->git()->commit('watch every package source directory');
+    $project->seedFor($nested, 'master');
+
+    $project->write('packages/shared/src/Shared.php', "<?php\n\n\$shared = 2;\n");
+    $project->git()->commit('rework the package');
+    $project->snapshot();
+
+    $result = $project->pestIn($nested, '--tia');
+
+    expect($result->exitCode)->toBe(0, $result->describe())
+        ->and($result->output)->toContain('this project loads from outside its root')
+        ->and($result->replayed())->toBe(0, $result->describe());
+})->skipOnWindows();

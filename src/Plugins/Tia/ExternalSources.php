@@ -205,10 +205,64 @@ final class ExternalSources
         $roots = $git->pathPrefix() === '' ? [] : array_keys($roots);
         $unverifiable = array_keys($unverifiable);
 
+        $ignoredRoots = self::ignoredRoots($repositoryRoot, $roots);
+
+        foreach ($ignoredRoots as $ignored) {
+            $unverifiable[] = $repositoryRoot.'/'.rtrim($ignored, '/');
+        }
+
+        $roots = array_values(array_diff($roots, $ignoredRoots));
+
         sort($roots);
         sort($unverifiable);
 
         return ['roots' => $roots, 'unverifiable' => $unverifiable];
+    }
+
+    /**
+     * @param  array<int, string>  $roots
+     * @return array<int, string>
+     */
+    private static function ignoredRoots(string $repositoryRoot, array $roots): array
+    {
+        static $cache = [];
+
+        $candidates = array_values(array_filter($roots, static fn (string $root): bool => $root !== ''));
+
+        if ($candidates === []) {
+            return [];
+        }
+
+        $key = $repositoryRoot."\x00".implode("\x00", $candidates);
+
+        if (isset($cache[$key])) {
+            return $cache[$key];
+        }
+
+        $result = new Git($repositoryRoot)->result(
+            ['check-ignore', '-z', '--stdin'],
+            implode("\x00", array_map(static fn (string $root): string => rtrim($root, '/'), $candidates)),
+        );
+
+        if ($result['exitCode'] !== 0 && $result['exitCode'] !== 1) {
+            return $cache[$key] = [];
+        }
+
+        $ignored = [];
+
+        foreach (explode("\x00", rtrim($result['output'], "\x00")) as $path) {
+            if ($path === '') {
+                continue;
+            }
+
+            foreach ($candidates as $root) {
+                if (rtrim($root, '/') === $path) {
+                    $ignored[] = $root;
+                }
+            }
+        }
+
+        return $cache[$key] = $ignored;
     }
 
     /**
@@ -407,7 +461,7 @@ final class ExternalSources
                 $url = $repository['url'] ?? null;
 
                 if (is_string($url) && $url !== '') {
-                    self::declare($declarations, $projectRoot, self::beforeWildcard($url), true);
+                    self::declare($declarations, $projectRoot, $url, true);
                 }
             }
         }
@@ -474,6 +528,17 @@ final class ExternalSources
      */
     private static function declare(array &$declarations, string $base, string $path, ?bool $isDirectory): void
     {
+        $literal = self::beforeWildcard($path);
+
+        if ($literal !== $path) {
+            $path = $literal;
+            $isDirectory = true;
+        }
+
+        if ($path === '') {
+            return;
+        }
+
         $resolved = self::absolutePath($base, $path);
 
         if ($resolved === null) {
@@ -498,11 +563,17 @@ final class ExternalSources
         return str_starts_with($path, '/') || preg_match('/^[a-z]:[\\\\\/]/i', $path) === 1;
     }
 
-    private static function beforeWildcard(string $url): string
+    private static function beforeWildcard(string $path): string
     {
+        $normalised = str_replace(DIRECTORY_SEPARATOR, '/', $path);
+
+        if (! str_contains($normalised, '*') && ! str_contains($normalised, '?')) {
+            return $path;
+        }
+
         $segments = [];
 
-        foreach (explode('/', str_replace(DIRECTORY_SEPARATOR, '/', $url)) as $segment) {
+        foreach (explode('/', $normalised) as $segment) {
             if (str_contains($segment, '*') || str_contains($segment, '?')) {
                 break;
             }

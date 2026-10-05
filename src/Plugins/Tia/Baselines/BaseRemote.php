@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Pest\Plugins\Tia\Baselines;
 
 use Pest\Plugins\Tia\WatchPatterns;
+use Pest\Support\Git;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
 /**
@@ -38,10 +40,7 @@ abstract readonly class BaseRemote // @pest-arch-ignore-line
 
     public function cliExists(): bool
     {
-        $process = new Process(['which', $this->cliName()]);
-        $process->run();
-
-        return $process->isSuccessful();
+        return new ExecutableFinder()->find($this->cliName()) !== null;
     }
 
     public function cliAuthenticated(): bool
@@ -75,23 +74,7 @@ abstract readonly class BaseRemote // @pest-arch-ignore-line
 
     protected function readOriginUrl(string $projectRoot): ?string // @pest-arch-ignore-line
     {
-        $gitConfig = $projectRoot.DIRECTORY_SEPARATOR.'.git'.DIRECTORY_SEPARATOR.'config';
-
-        if (! is_file($gitConfig)) {
-            return null;
-        }
-
-        $content = @file_get_contents($gitConfig);
-
-        if ($content === false) {
-            return null;
-        }
-
-        if (preg_match('/\[remote "origin"\][^\[]*?url\s*=\s*(\S+)/s', $content, $match) !== 1) {
-            return null;
-        }
-
-        return $match[1];
+        return new Git($projectRoot)->originUrl();
     }
 
     /**

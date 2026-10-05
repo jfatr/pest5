@@ -130,6 +130,9 @@ final class Project
         }
 
         self::copy(__DIR__.'/app', $path);
+
+        $this->write($directory.DIRECTORY_SEPARATOR.'.gitignore', implode("\n", ['/vendor/', '/.phpunit.cache/', '']));
+
         $this->scaffoldVendor($path);
 
         return $path;
@@ -394,7 +397,12 @@ final class Project
 
     public function graphDir(): string
     {
-        return $this->withHome(fn (): string => Storage::tempDir($this->graphRoot));
+        return $this->stateDirFor($this->graphRoot);
+    }
+
+    public function stateDirFor(string $root): string
+    {
+        return $this->withHome(fn (): string => Storage::tempDir($root));
     }
 
     public function graphExists(): bool
@@ -519,11 +527,19 @@ final class Project
             throw new RuntimeException(sprintf('Unable to create [%s].', $directory));
         }
 
-        if (@link($from, $to) || @copy($from, $to)) {
+        if ((self::shareDevice($from, $directory) && @link($from, $to)) || @copy($from, $to)) {
             return;
         }
 
         throw new RuntimeException(sprintf('Unable to mirror [%s] into [%s].', $from, $to));
+    }
+
+    private static function shareDevice(string $from, string $directory): bool
+    {
+        $source = @stat($from);
+        $target = @stat($directory);
+
+        return $source !== false && $target !== false && $source['dev'] === $target['dev'];
     }
 
     /**
